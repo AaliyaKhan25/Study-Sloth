@@ -14,6 +14,95 @@ def syllabus_job(sid, text, p):
     units = [u for u in r.get("units", []) if isinstance(u, dict) and u.get("name")] or [{"name": "General", "topics": []}]
     db.x("update subjects set syllabus=?, units=? where id=?", (text, json.dumps(units), sid))
 
+def _split_words(text, limit):
+    parts, words, size = [], [], 0
+    for word in text.split():
+        if len(word) > limit:
+            if words:
+                parts.append(" ".join(words)); words, size = [], 0
+            parts.extend(word[i:i + limit] for i in range(0, len(word), limit))
+        elif words and size + len(word) + 1 > limit:
+            parts.append(" ".join(words)); words, size = [word], len(word)
+        else:
+            words.append(word); size += len(word) + (1 if len(words) > 1 else 0)
+    if words: parts.append(" ".join(words))
+    return parts
+
+def _pdf_chunks(path, limit=12000):
+    from pypdf import PdfReader
+    reader = PdfReader(path)
+    chunks, current, current_size, text_pages = [], [], 0, 0
+    for page_number, page in enumerate(reader.pages, 1):
+        text = (page.extract_text() or "").strip()
+        if not text: continue
+        text_pages += 1
+        marker = f"[Source page {page_number}]\n"
+        for part in _split_words(text, limit - len(marker)):
+            block = marker + part
+            if current and current_size + len(block) + 1 > limit:
+                chunks.append("\n".join(current)); current, current_size = [], 0
+            current.append(block); current_size += len(block) + 1
+    if current: chunks.append("\n".join(current))
+    if not text_pages:
+        raise ValueError("No selectable text was found in this PDF. Scanned PDFs need OCR before note generation.")
+    return chunks
+
+def _pdf_notes_from_text(text, title, final=False):
+    if final:
+        prompt = (f"Create short, clear study notes for the PDF titled {title!r} from these section notes. "
+                  "Combine repeated ideas, keep important definitions, formulas, processes and comparisons, "
+                  "and retain source page references in [p. N] form. Use a few headings and concise bullets; "
+                  "aim for under 1000 words. Use only the supplied material.\n\n" + text)
+    else:
+        prompt = (f"Summarize this part of the PDF titled {title!r} as concise study notes. "
+                  "Keep important definitions, formulas, steps, distinctions and examples. Use a heading and "
+                  "at most 8 concise bullets. Preserve source page references such as [Source page 4]. "
+                  "Do not add outside facts.\n\n" + text)
+    result = chat(prompt, system=SYS, num_predict=1536 if final else 512).strip()
+    if not result: raise RuntimeError("The local model returned empty notes.")
+    return result
+
+def _group_notes(parts, limit=4500):
+    groups, current, current_size = [], [], 0
+    for part in parts:
+        subparts = _split_words(part, limit) if len(part) > limit else [part]
+        for item in subparts:
+            if current and current_size + len(item) + 2 > limit:
+                groups.append(current); current, current_size = [], 0
+            current.append(item); current_size += len(item) + 2
+    if current: groups.append(current)
+    return groups
+
+def pdf_notes_job(doc_id, path, p):
+    doc = db.q("select title from pdf_notes where id=?", (doc_id,))[0]
+    title = doc["title"]
+    p(0.02, "Extracting PDF text")
+    chunks = _pdf_chunks(path)
+    if len(chunks) == 1:
+        p(0.08, "Summarizing PDF with local qwen3:4b")
+        summaries = [_pdf_notes_from_text(chunks[0], title, final=True)]
+    else:
+        summaries = []
+        for i, chunk in enumerate(chunks):
+            p(0.05 + 0.6 * i / len(chunks), f"Summarizing section {i + 1}/{len(chunks)} with local qwen3:4b")
+            summaries.append(_pdf_notes_from_text(chunk, title))
+            p(0.05 + 0.6 * (i + 1) / len(chunks), f"Summarized section {i + 1}/{len(chunks)}")
+    level = 0
+    while sum(map(len, summaries)) > 5000:
+        if level >= 8: raise RuntimeError("Could not combine the PDF notes into a short summary.")
+        groups = _group_notes(summaries)
+        combined = []
+        for i, group in enumerate(groups):
+            p(0.72 + 0.18 * min(level + (i + 1) / len(groups), 1), "Combining section notes")
+            combined.append(_pdf_notes_from_text("\n\n".join(group), title))
+        summaries = combined; level += 1
+    if len(chunks) == 1:
+        notes = summaries[0]
+    else:
+        p(0.94, "Writing final notes")
+        notes = _pdf_notes_from_text("\n\n".join(summaries), title, final=True)
+    db.x("update pdf_notes set notes=? where id=?", (notes, doc_id))
+
 def transcribe(path, p):
     global _wm
     from faster_whisper import WhisperModel

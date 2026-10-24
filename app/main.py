@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from . import db, pipeline as pl
 
 app = FastAPI(title="Study Sloth"); db.init()
+db.x("update jobs set status='error',message='Interrupted by app restart' where status in ('queued','running')")
 UP = "data/uploads"; os.makedirs(UP, exist_ok=True)
 pool = ThreadPoolExecutor(max_workers=1)   # one heavy job at a time on a laptop
 
@@ -29,6 +30,9 @@ def one(sql, args):
 @app.get("/")
 def home(): return FileResponse("app/static/index.html")
 
+@app.get("/logo.png")
+def logo(): return FileResponse("app/static/study-sloth-logo.png", media_type="image/png")
+
 @app.get("/api/subjects")
 def subjects(): return db.q("select id,name from subjects order by id desc")
 
@@ -40,6 +44,7 @@ def subject(sid: int):
     s = one("select * from subjects where id=?", (sid,)); s["units"] = json.loads(s["units"])
     return {"subject": s,
             "lectures": db.q("select id,title,length(transcript) as t from lectures where subject_id=?", (sid,)),
+            "pdf_notes": db.q("select n.id,n.title,n.source_name,length(n.notes) as note_chars,coalesce((select j.status from jobs j where j.kind='pdf_notes' and j.ref_id=n.id order by j.id desc limit 1),'done') as status from pdf_notes n where n.subject_id=? order by n.id desc", (sid,)),
             "labs": db.q("select id,title,reviewed from labs where subject_id=?", (sid,)),
             "cards": db.q("select * from cards where subject_id=? order by id", (sid,))}
 
@@ -53,6 +58,22 @@ def syllabus(sid: int, text: str = Form(""), file: UploadFile = File(None)):
         else: text = raw.decode("utf-8", "ignore")
     if not text.strip(): raise HTTPException(400, "Paste the syllabus or upload a .txt/.pdf")
     submit("syllabus", sid, pl.syllabus_job, sid, text); return {"ok": 1}
+
+@app.post("/api/subjects/{sid}/pdf-notes")
+def pdf_notes(sid: int, file: UploadFile = File(...), title: str = Form("")):
+    one("select id from subjects where id=?", (sid,))
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Upload a PDF to make notes")
+    path = save(file)
+    note_title = title.strip() or os.path.splitext(os.path.basename(file.filename))[0]
+    doc_id = db.x("insert into pdf_notes(subject_id,title,source_name,source_path) values(?,?,?,?)",
+                  (sid, note_title, os.path.basename(file.filename), path))
+    submit("pdf_notes", doc_id, pl.pdf_notes_job, doc_id, path)
+    return {"id": doc_id}
+
+@app.get("/api/pdf-notes/{doc_id}")
+def pdf_note_get(doc_id: int):
+    return one("select id,title,source_name,notes from pdf_notes where id=?", (doc_id,))
 
 @app.post("/api/subjects/{sid}/lectures")
 def lecture(sid: int, title: str = Form(...), file: UploadFile = File(...)):

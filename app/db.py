@@ -4,6 +4,7 @@ os.makedirs(os.path.dirname(DB), exist_ok=True)
 SCHEMA = """
 create table if not exists subjects(id integer primary key, name text, syllabus text default '', units text default '[]');
 create table if not exists lectures(id integer primary key, subject_id int, title text, transcript text default '', points text default '[]', board text default '[]');
+create table if not exists pdf_notes(id integer primary key, subject_id int, title text, source_name text, source_path text, notes text default '');
 create table if not exists cards(id integer primary key, subject_id int, lecture_id int, lab_id int, kind text, q text, a text, extra text default '');
 create table if not exists labs(id integer primary key, subject_id int, title text, code text, output text, output_note text default '', record text default '{}', reviewed int default 0);
 create table if not exists jobs(id integer primary key, kind text, ref_id int, status text, progress real, message text);
