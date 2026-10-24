@@ -9,4 +9,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install fastapi uvicorn python-multipart httpx pypdf pytest
-      - run: pytest -q
+      - run: python -m pytest -q
