@@ -78,7 +78,8 @@ def pdf_note_get(doc_id: int):
 @app.post("/api/subjects/{sid}/lectures")
 def lecture(sid: int, title: str = Form(...), file: UploadFile = File(...)):
     lid = db.x("insert into lectures(subject_id,title) values(?,?)", (sid, title))
-    submit("lecture", lid, pl.lecture_job, lid, save(file)); return {"id": lid}
+    path = save(file)
+    submit("lecture", lid, pl.pdf_job if path.lower().endswith(".pdf") else pl.lecture_job, lid, path); return {"id": lid}
 
 @app.get("/api/lectures/{lid}")
 def lecture_get(lid: int):

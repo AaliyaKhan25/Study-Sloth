@@ -138,6 +138,23 @@ def lecture_job(lid, path, p):
     p(0.93, "Making flashcards and questions")
     cards_from(lec["subject_id"], lid, "\n".join(f"{x.get('heading','')}: {x.get('text','')}" for x in pts)[:6000])
 
+def pdf_job(lid, path, p):
+    from pypdf import PdfReader
+    lec = db.q("select * from lectures where id=?", (lid,))[0]
+    names = [u["name"] for u in units_of(lec["subject_id"])] or ["General"]
+    p(0.1, "Reading PDF")
+    pages = [f"[p.{i}]\n{(pg.extract_text() or '').strip()}" for i, pg in enumerate(PdfReader(path).pages, 1)]
+    db.x("update lectures set transcript=? where id=?", ("\n\n".join(pages), lid))
+    pts, cs = [], list(chunks(pages, 3500))      # a few pages at a time, so nothing is cut off
+    for i, c in enumerate(cs):
+        p(0.15 + 0.75 * i / max(len(cs), 1), f"Writing notes {i + 1}/{len(cs)}")
+        r = chat_json(f'Units: {names}\nThese are pages from the student\'s notes. Extract every teaching point. Keep every named item (tools, terms, formulas, steps) and do not skip or merge items. Return JSON: {{"points":[{{"unit":"<one of the units above>","heading":"short","text":"1-3 sentences","ts":"page, e.g. p.3"}}]}}\n\n{c}', system=SYS)
+        pts += [x for x in r.get("points", []) if isinstance(x, dict)]
+    db.x("update lectures set points=? where id=?", (json.dumps(pts), lid))
+    p(0.93, "Making flashcards and questions")
+    cards_from(lec["subject_id"], lid, "\n".join(f"{x.get('heading','')}: {x.get('text','')}" for x in pts)[:6000])
+
+
 def cards_from(sid, lid, notes):
     r = chat_json('From these notes make study material. Return JSON: {"flashcards":[{"q":"","a":""}] (8), "quiz":[{"q":"","options":["","","",""],"answer":0}] (5, answer is option index), "viva":[{"q":"","a":""}] (5)}\n\n' + notes, system=SYS)
     db.x("delete from cards where lecture_id=?", (lid,))
