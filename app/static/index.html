@@ -1,0 +1,78 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Study Sloth</title>
+<style>
+:root{--fog:#edf0ea;--card:#f9faf7;--ink:#1e2b2f;--moss:#3e6a50;--bark:#7a6652;--sun:#e2c15a;--line:#cbd3c6;--bad:#a4402f}
+@media(prefers-color-scheme:dark){:root{--fog:#161c1a;--card:#1f2724;--ink:#e6ebe4;--moss:#7fb592;--bark:#b9a48d;--line:#34413b;--bad:#e08a78}}
+*{box-sizing:border-box}body{margin:0;background:var(--fog);color:var(--ink);font:15px/1.55 system-ui,sans-serif;display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+h1,h2,h3{font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;font-weight:600;margin:.2em 0}
+aside{background:var(--moss);color:#f4f7f1;padding:1rem;display:flex;flex-direction:column;gap:.4rem}
+aside h1{font-size:1.4rem;color:#fff}aside button.s{all:unset;cursor:pointer;padding:.4rem .6rem;border-radius:6px}
+aside button.s:hover,aside button.s.on{background:rgba(255,255,255,.18)}aside input{width:100%}
+main{padding:1.5rem;max-width:920px;padding-bottom:5rem}
+nav{display:flex;gap:1.2rem;border-bottom:1px solid var(--line);margin:.8rem 0 1.2rem}
+nav button{all:unset;cursor:pointer;padding:.4rem 0;border-bottom:3px solid transparent}nav button.on{border-color:var(--sun);font-weight:600}
+input,textarea,button.b{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.4rem .6rem}
+textarea{width:100%;min-height:90px;font-family:ui-monospace,monospace;font-size:13px}
+button.b{background:var(--moss);color:#fff;border-color:var(--moss);cursor:pointer}button.b:disabled{opacity:.5}
+:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.9rem 1rem;margin:.7rem 0}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin:.4rem 0}
+.ts{font-family:ui-monospace,monospace;font-size:12px;color:var(--bark)}
+pre{white-space:pre-wrap;background:var(--fog);padding:.6rem;border-radius:6px;font-size:13px}
+.flash{cursor:pointer;min-height:70px}.warn{color:var(--bad)}label{display:block;font-weight:600;margin-top:.7rem}
+#jobs{position:fixed;bottom:0;left:230px;right:0;background:var(--ink);color:var(--fog);padding:.5rem 1.5rem;font-size:13px}
+#jobs progress{width:140px;vertical-align:middle}
+@media(max-width:700px){body{grid-template-columns:1fr}#jobs{left:0}}
+</style></head><body>
+<aside><h1>Study Sloth</h1><div id="subs"></div>
+<form onsubmit="newSub(event)"><input id="ns" placeholder="New subject, e.g. DBMS" aria-label="New subject name"></form></aside>
+<main id="main"><p>Create a subject on the left, then add your syllabus and lectures.</p></main>
+<div id="jobs" hidden></div>
+<script>
+const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,o){const r=await fetch('/api'+p,o);if(!r.ok){let m=await r.text();try{m=JSON.parse(m).detail}catch(e){}throw new Error(m)}return r.json()}
+const post=(p,fd)=>api(p,{method:'POST',body:fd});
+const J=(p,b)=>api(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const fd=f=>new FormData(f);
+let D=null,tab='notes',sid=null,wasBusy=false;
+async function subs(){const l=await api('/subjects');document.getElementById('subs').innerHTML=l.map(s=>`<button class="s ${s.id==sid?'on':''}" onclick="open_(${s.id})">${esc(s.name)}</button>`).join('')}
+async function newSub(e){e.preventDefault();const f=new FormData();f.append('name',ns.value);const r=await post('/subjects',f);ns.value='';open_(r.id)}
+async function open_(id){sid=id;D=await api('/subjects/'+id);subs();draw()}
+function setTab(t){tab=t;draw()}
+function draw(){if(!D)return;const s=D.subject;
+ main.innerHTML=`<h2>${esc(s.name)}</h2><nav>${['notes','study','labs','syllabus'].map(t=>`<button class="${t==tab?'on':''}" onclick="setTab('${t}')">${{notes:'Lectures',study:'Study',labs:'Lab records',syllabus:'Syllabus'}[t]}</button>`).join('')}</nav><div id="tab"></div>`;
+ ({notes:tNotes,study:tStudy,labs:tLabs,syllabus:tSyl})[tab]()}
+function err(e){alert(e.message)}
+async function send(e,path){e.preventDefault();try{await post(path,fd(e.target));e.target.reset();poll()}catch(x){err(x)}}
+function tSyl(){const u=D.subject.units;tab_.innerHTML=`<form class="box" onsubmit="send(event,'/subjects/${sid}/syllabus')"><label>Paste syllabus text</label><textarea name="text" placeholder="Unit 1: ER model, keys... "></textarea><div class="row"><input type="file" name="file" accept=".txt,.pdf" aria-label="Or upload a syllabus"><button class="b">Split into units</button></div></form>`+
+ u.map(x=>`<div class="box"><h3>${esc(x.name)}</h3><div>${(x.topics||[]).map(esc).join(', ')}</div></div>`).join('')}
+function tNotes(){tab_.innerHTML=`<form class="box" onsubmit="send(event,'/subjects/${sid}/lectures')"><div class="row"><input name="title" placeholder="Lecture title, e.g. Joins" required><input type="file" name="file" accept="audio/*,video/*" required aria-label="Lecture recording"><button class="b">Make notes</button></div>${D.subject.units.length?'':'<div class="ts">Tip: add the syllabus first so notes sort into units.</div>'}</form>`+
+ D.lectures.map(l=>`<div class="box"><div class="row"><h3 style="flex:1">${esc(l.title)}</h3>${l.t?`<button class="b" onclick="showLec(${l.id})">Open notes</button>`:'<span class="ts">processing…</span>'}
+ <label style="margin:0;font-weight:400" class="ts">+ board photo <input type="file" accept="image/*" onchange="board(${l.id},this)"></label></div><div id="lec${l.id}"></div></div>`).join('')}
+async function board(id,i){const f=new FormData();f.append('file',i.files[0]);try{await post('/lectures/'+id+'/board',f);poll()}catch(x){err(x)}}
+async function showLec(id){const l=await api('/lectures/'+id);document.getElementById('lec'+id).innerHTML=l.notes.map(u=>`<h3>${esc(u.unit)}</h3>`+u.points.map(p=>`<p><b>${esc(p.heading)}</b> <span class="ts">${esc(p.ts||'')}</span><br>${esc(p.text)}</p>`).join('')+u.board.map(b=>`<div class="box"><b>From the board: ${esc(b.title)}</b><pre>${esc(b.markdown)}</pre></div>`).join('')).join('')||'<p>No notes yet.</p>'}
+function tStudy(){const c=D.cards,by=k=>c.filter(x=>x.kind==k);
+ if(!c.length){tab_.innerHTML='<p>Flashcards and questions appear here after a lecture or lab is processed.</p>';return}
+ tab_.innerHTML=`<h3>Flashcards (click to flip)</h3>`+by('flash').map(x=>`<div class="box flash" tabindex="0" onclick="this.dataset.f=this.dataset.f?'':1;this.innerHTML=this.dataset.f?esc2('${btoa(unescape(encodeURIComponent(x.a)))}'):esc2('${btoa(unescape(encodeURIComponent(x.q)))}')" >${esc(x.q)}</div>`).join('')+
+ `<h3>Quiz</h3>`+by('quiz').map(x=>{const e=JSON.parse(x.extra||'{}');return `<div class="box"><b>${esc(x.q)}</b>${(e.options||[]).map((o,i)=>`<div><label style="font-weight:400"><input type="radio" name="q${x.id}" onchange="this.closest('.box').querySelector('.r').textContent='${i==e.answer?'Correct.':'Not quite. Answer: '+esc(String(e.options[e.answer]||'')).replace(/'/g,'’')}'"> ${esc(o)}</label></div>`).join('')}<div class="r ts"></div></div>`}).join('')+
+ `<h3>Likely viva questions</h3>`+by('viva').map(x=>`<details class="box"><summary>${esc(x.q)}${x.lab_id?' <span class="ts">(from your lab)</span>':''}</summary>${esc(x.a)}</details>`).join('')}
+const esc2=b=>esc(decodeURIComponent(escape(atob(b))));
+function tLabs(){tab_.innerHTML=`<form class="box" onsubmit="send(event,'/subjects/${sid}/labs')"><label>Experiment title</label><input name="title" required style="width:100%" placeholder="Experiment 4: LEFT JOIN on two tables">
+ <label>Your code</label><textarea name="code" required></textarea><label>Output from your real run (paste it, or upload a screenshot)</label><textarea name="output"></textarea>
+ <div class="row"><input type="file" name="file" accept="image/*" aria-label="Output screenshot"><button class="b">Write lab record</button></div></form>`+
+ D.labs.map(l=>`<div class="box row"><span style="flex:1">${esc(l.title)} ${l.reviewed?'<span class="ts">(reviewed)</span>':''}</span><button class="b" onclick="showLab(${l.id})">Review</button></div>`).join('')+'<div id="lab"></div>'}
+async function showLab(id){const l=await api('/labs/'+id),r=l.record;if(!r.aim&&!r.theory){lab.innerHTML='<p class="ts">Still being written…</p>';return}
+ const T=(k,v,h)=>`<label>${k}</label><textarea id="f_${k}" style="min-height:${h||70}px;font-family:inherit">${esc(v)}</textarea>`;
+ lab.innerHTML=`<div class="box"><h3>${esc(l.title)}</h3>${T('aim',r.aim)}${T('theory',r.theory,130)}${T('procedure',r.procedure)}<label>code</label><textarea id="f_code">${esc(l.code)}</textarea>
+ <label>output (yours, not generated)</label><textarea id="f_output">${esc(l.output)}</textarea>${l.output_note?`<div class="warn">${esc(l.output_note)}</div>`:''}${T('conclusion',r.conclusion)}
+ <div class="ts">Theory drawn from: ${(r.sources||[]).map(esc).join('; ')||'no lecture notes matched'}</div>
+ <label style="font-weight:400"><input type="checkbox" id="ok"> The output above is from my own run, and I have checked the theory and conclusion.</label>
+ <div class="row"><button class="b" onclick="fin(${id})">Save and open print view</button></div></div>`}
+async function fin(id){const g=k=>document.getElementById('f_'+k).value;try{await J('/labs/'+id+'/review',{confirmed:ok.checked,code:g('code'),output:g('output'),record:{aim:g('aim'),theory:g('theory'),procedure:g('procedure'),conclusion:g('conclusion')}});window.open('/labs/'+id+'/print')}catch(x){err(x)}}
+const tab_={set innerHTML(v){document.getElementById('tab').innerHTML=v}};
+async function poll(){const j=await api('/jobs'),act=j.filter(x=>x.status=='queued'||x.status=='running'),el=document.getElementById('jobs');
+ const bad=j.find(x=>x.status=='error');
+ el.hidden=!act.length&&!bad;el.innerHTML=act.map(x=>`${esc(x.kind)}: ${esc(x.message)} <progress value="${x.progress}" max="1"></progress>`).join(' &nbsp; ')||(bad?`<span>Last job failed: ${esc(bad.message)}</span>`:'');
+ if(wasBusy&&!act.length&&sid)D=await api('/subjects/'+sid),draw();wasBusy=!!act.length}
+setInterval(()=>poll().catch(()=>{}),2000);subs();
+</script></body></html>
