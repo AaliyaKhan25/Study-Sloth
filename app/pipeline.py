@@ -155,12 +155,14 @@ def lecture_job(lid, path, p):
     lec = db.q("select * from lectures where id=?", (lid,))[0]
     names = [u["name"] for u in units_of(lec["subject_id"])] or ["General"]
     lines = transcribe(path, p)
+    p(0.5, "Transcription finished; preparing lecture notes")
     db.x("update lectures set transcript=? where id=?", ("\n".join(lines), lid))
-    pts, cs = [], list(chunks(lines))
+    pts, cs = [], list(chunks(lines, size=9000))
     for i, c in enumerate(cs):
-        p(0.5 + 0.4 * i / max(len(cs), 1), f"Writing notes {i + 1}/{len(cs)}")
+        p(0.5 + 0.4 * i / max(len(cs), 1), f"Extracting notes {i + 1}/{len(cs)}")
         r = chat_json(f'Units: {names}\nFrom this lecture transcript, extract the teaching points. Return JSON: {{"points":[{{"unit":"<one of the units above>","heading":"short","text":"1-3 sentences","ts":"MM:SS of the transcript line it came from"}}]}}\n\n{c}', system=SYS)
         pts += [x for x in r.get("points", []) if isinstance(x, dict)]
+        p(0.5 + 0.4 * (i + 1) / max(len(cs), 1), f"Extracted notes {i + 1}/{len(cs)}")
     db.x("update lectures set points=? where id=?", (json.dumps(pts), lid))
     p(0.93, "Making flashcards and questions")
     cards_from(lec["subject_id"], lid, "\n".join(f"{x.get('heading','')}: {x.get('text','')}" for x in pts)[:6000])

@@ -17,7 +17,7 @@ def transcribe(path, progress):
         raise RuntimeError("This recording exceeds Groq's 25 MB upload limit. Compress or shorten it, then try again.")
 
     content_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    progress(0.05, "Uploading lecture for transcription")
+    progress(0.05, "Sending recording to Groq Whisper (long videos can take a few minutes)")
     with open(path, "rb") as audio:
         response = httpx.post(
             TRANSCRIPTION_URL,

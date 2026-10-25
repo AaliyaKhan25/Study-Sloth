@@ -89,7 +89,10 @@ def test_hosted_transcription_uses_groq_and_returns_timestamps(tmp_path, monkeyp
     assert request.call_args.args[0] == hosted_transcription.TRANSCRIPTION_URL
     assert request.call_args.kwargs["headers"] == {"Authorization": "Bearer test-api-key"}
     assert request.call_args.kwargs["data"]["model"] == "whisper-large-v3-turbo"
-    assert progress == [(0.05, "Uploading lecture for transcription"), (0.5, "Transcription complete")]
+    assert progress == [
+        (0.05, "Sending recording to Groq Whisper (long videos can take a few minutes)"),
+        (0.5, "Transcription complete"),
+    ]
 
 def test_hosted_transcription_requires_groq_key(monkeypatch, tmp_path):
     from app import hosted_transcription
@@ -148,6 +151,25 @@ def test_hosted_app_keeps_lecture_transcription_enabled(monkeypatch):
 
     assert response.status_code == 200
     assert submitted[0][2] is pl.lecture_job
+
+def test_lecture_job_batches_notes_and_reports_completed_chunks():
+    lines = [f"[00:00] {str(index).ljust(90, 'x')}" for index in range(200)]
+    progress = []
+    extracted_points = {"points": [{"unit": "Unit 1", "heading": "Topic", "text": "Details"}]}
+
+    with mock.patch.object(pl.db, "q", return_value=[{"subject_id": 1}]), \
+            mock.patch.object(pl.db, "x"), \
+            mock.patch.object(pl, "units_of", return_value=[{"name": "Unit 1"}]), \
+            mock.patch.object(pl, "transcribe", return_value=lines), \
+            mock.patch.object(pl, "chat_json", return_value=extracted_points) as generate_notes, \
+            mock.patch.object(pl, "cards_from") as generate_cards:
+        pl.lecture_job(1, "lecture.mp4", lambda value, message="": progress.append((value, message)))
+
+    assert generate_notes.call_count == 3
+    assert progress[0] == (0.5, "Transcription finished; preparing lecture notes")
+    assert progress[-3] == (pytest.approx(0.9 - 0.4 / 3), "Extracting notes 3/3")
+    assert progress[-2] == (pytest.approx(0.9), "Extracted notes 3/3")
+    generate_cards.assert_called_once()
 
 def test_lab_manual_requires_actual_outputs_before_final_print():
     from app import db
