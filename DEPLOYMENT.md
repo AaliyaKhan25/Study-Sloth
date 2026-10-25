@@ -5,18 +5,42 @@ The Render Blueprint in `render.yaml` creates two web services:
 | Service | App | Plan |
 | --- | --- | --- |
 | `study-sloth-online` | Notes/PDF study tools (`online.py`) | Free |
-| `study-sloth-hosted` | Full hosted Study Sloth workspace (`web.py`), including CPU-based audio/video transcription | Standard + 5 GB persistent disk |
+| `study-sloth-hosted` | Full hosted Study Sloth workspace (`web.py`), including Groq API audio/video transcription | Free |
 
-The full hosted service needs the Standard instance for CPU-based Whisper transcription and a persistent disk for its SQLite workspaces, uploads, and cached transcription model. Render's Standard service and disk are billable; check the current price in your Render dashboard before deploying. The free lightweight online service may sleep when idle and its in-progress jobs/results are held in memory.
+Both services use Render's free web-service plan. The full app sends audio/video recordings to Groq's speech-to-text API instead of running a Whisper model on Render. Free Render services have an ephemeral filesystem: workspaces, SQLite data, and uploads may be lost after a restart, redeploy, or sleep cycle. Free services can sleep when idle. Check Groq's current API limits, file-size restrictions, and pricing before use.
 
-## Create the services
+## Create the full app as a Web Service
 
-1. Push this repository to a Git provider supported by Render.
-2. In Render, create a **Blueprint** from the repository and review the two services and their plans before applying it.
-3. For **both** services, set `OLLAMA_API_KEY` in the Render dashboard to a valid Ollama Cloud API key. It is a secret: do not put it in this repository. The Blueprint sets `OLLAMA_HOST` to `https://ollama.com` and `SLOTH_MODEL` to `gemma3:4b`. Confirm Gemma 3 4B is available to your Ollama Cloud account.
-4. Wait for both deploys to finish, then check each service URL. AI requests require a valid key and model access.
+1. Push this repository to GitHub and create a **Web Service** in Render from `AaliyaKhan25/Study-Sloth`, branch `main`.
+2. Set **Root Directory** to blank and choose the **Free** instance type.
+3. Use these commands:
 
-The hosted app is the full browser-workspace version, including audio/video transcription. Whisper runs on the Render server using CPU; the first transcription may take longer while the model is downloaded and cached on the persistent disk. Its workspace data, uploads, and model cache are stored on that disk, but there is no account login; do not upload sensitive or confidential material. Processing runs on your Render service rather than on the student's device.
+   ```text
+   Build:  pip install -r requirements-web.txt
+   Start:  uvicorn web:app --host 0.0.0.0 --port $PORT
+   ```
+
+4. Add the environment variables below. Mark both API keys as secrets. Do not commit or share them.
+
+   | Key | Value |
+   | --- | --- |
+   | `PYTHON_VERSION` | `3.12.11` |
+   | `OLLAMA_HOST` | `https://ollama.com` |
+   | `OLLAMA_API_KEY` | Your Ollama Cloud API key (secret) |
+   | `SLOTH_MODEL` | `gemma3:4b` |
+   | `SLOTH_VISION_MODEL` | `qwen3-vl:4b-instruct` |
+   | `GROQ_API_KEY` | Your Groq API key (secret) |
+   | `GROQ_TRANSCRIPTION_MODEL` | `whisper-large-v3-turbo` |
+
+   Confirm the selected models and current usage limits are available to your accounts.
+5. Do **not** add a disk or set the old `/var/data` values for `SLOTH_DB`, `SLOTH_UPLOAD_DIR`, or `HF_HOME` on this free service. The app uses default writable filesystem paths, which are temporary on Render Free.
+6. Deploy and check the service URL. AI and transcription requests require valid provider keys and available quotas.
+
+The `render.yaml` Blueprint is also configured for free services, but you can create the web service manually with the settings above instead.
+
+The hosted app includes browser-based audio/video transcription via Groq. Recordings are sent to Groq for processing; the direct upload limit is 25 MB. Review Groq's data-handling terms and current quota/pricing before uploading. Render's free filesystem is temporary, so the app's SQLite workspace data and uploads are not durable and can disappear during service restarts or redeploys. The app does not have account login; do not upload sensitive or confidential material.
+
+If you previously added `/var/data` environment paths while configuring a persistent disk, remove `SLOTH_DB`, `SLOTH_UPLOAD_DIR`, and `HF_HOME` from the free service. The app detects an unmounted `/var/data` path and falls back to temporary storage with a warning, but removing those variables keeps the setup clear.
 
 ## Connect the .tech domain
 

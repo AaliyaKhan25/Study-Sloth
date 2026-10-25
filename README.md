@@ -57,12 +57,12 @@ The hosted and online experiences have different capabilities from the local app
 | --- | :---: | :---: | :---: |
 | Course organization and syllabus | Yes | Yes | — |
 | PDF notes | Yes | Yes | Yes |
-| Lecture audio/video transcription | Yes | Yes (CPU Whisper on Render) | — |
+| Lecture audio/video transcription | Yes (local Whisper) | Yes (Groq API; 25 MB upload limit) | — |
 | Lab records and generated lab manuals | Yes | Yes | — |
 | Study cards and quizzes | Yes | Yes | Yes |
 | Per-browser hosted workspace | — | Yes | — |
 
-The hosted variants use Ollama Cloud by default in the Render configuration. Uploaded content sent for AI processing is processed by the configured model provider; do not upload confidential material unless you have reviewed and accepted the provider's data-handling terms.
+The hosted variants use Ollama Cloud for study-content generation. Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
 
 ## Interface
 
@@ -75,7 +75,7 @@ Study Sloth uses a light, high-contrast visual theme with forest-green accents, 
 - Python 3.12 recommended
 - Git
 - [Ollama](https://ollama.com/) for local model inference, or an Ollama Cloud API key
-- For audio/video lecture transcription: the dependencies in the root `requirements.txt` (including the compatible PyAV range)
+- For local audio/video lecture transcription: the dependencies in the root `requirements.txt` (including the compatible PyAV range)
 
 ### 1. Get the project
 
@@ -136,7 +136,9 @@ Study Sloth uses the Ollama chat API and lets you select the text and vision mod
 | `OLLAMA_API_KEY` | Empty | API key for a hosted Ollama provider |
 | `SLOTH_MODEL` | `gemma3:4b` | Text-generation model |
 | `SLOTH_VISION_MODEL` | `qwen3-vl:4b-instruct` | Model used when an image is included |
-| `SLOTH_WHISPER` | `small` | faster-whisper model size for transcription |
+| `SLOTH_WHISPER` | `small` | Local faster-whisper model size |
+| `GROQ_API_KEY` | Empty | Secret API key for hosted audio/video transcription |
+| `GROQ_TRANSCRIPTION_MODEL` | `whisper-large-v3-turbo` | Groq speech-to-text model |
 
 **Gemma:** Study Sloth uses Gemma 3 4B (`gemma3:4b`) as its default text-generation model, including in the Render Blueprint. For a local run:
 
@@ -151,19 +153,28 @@ GitHub Copilot was used as an AI development assistant during implementation. It
 
 ## Deployment
 
-The repository includes a [Render Blueprint](./render.yaml) for two web services:
+The repository includes a [Render Blueprint](./render.yaml) for two free web services:
 
 | Render service | Application | Deployment notes |
 | --- | --- | --- |
 | `study-sloth-online` | `online.py` | Free plan; lightweight notes/PDF workflow |
-| `study-sloth-hosted` | `web.py` | Standard plan and 5 GB persistent disk for hosted workspaces, uploads, and the cached Whisper model |
+| `study-sloth-hosted` | `web.py` | Free plan; Groq API transcription |
 
 The deployment configuration is prepared for Render and the `.tech` domain `studysloth.tech`:
 
 - `studysloth.tech` is intended for the complete Study Sloth workspace.
 - `quick.studysloth.tech` is intended for the lightweight notes/PDF experience.
 
-The domain and Render configuration are **not proof that the services have been deployed or DNS has been connected**. A Render account, a valid `OLLAMA_API_KEY` configured as a secret, service deployment, and DNS changes at the domain's DNS provider are still required. Render supplies the exact DNS records after custom domains are added. Review Render's current plan and persistent-disk pricing before provisioning the hosted workspace.
+The domain and Render configuration are **not proof that the services have been deployed or DNS has been connected**. A Render account, valid `OLLAMA_API_KEY` and (for the full hosted app) `GROQ_API_KEY` configured as secrets, service deployment, and DNS changes at the domain's DNS provider are still required. Render supplies the exact DNS records after custom domains are added. Free Render services have ephemeral storage; SQLite data and uploaded files may be lost after restarts or redeploys. Check Groq's current API quota and pricing.
+
+For a manual Render Web Service (without a Blueprint), use:
+
+```text
+Build:  pip install -r requirements-web.txt
+Start:  uvicorn web:app --host 0.0.0.0 --port $PORT
+```
+
+Leave **Root Directory** blank. Set `OLLAMA_HOST=https://ollama.com`, `OLLAMA_API_KEY` (secret), `SLOTH_MODEL=gemma3:4b`, `SLOTH_VISION_MODEL=qwen3-vl:4b-instruct`, `GROQ_API_KEY` (secret), and `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`. Do not set the old `/var/data` paths (`SLOTH_DB`, `SLOTH_UPLOAD_DIR`, or `HF_HOME`) on a free service without a disk.
 
 For the step-by-step checklist, see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
@@ -185,7 +196,7 @@ python -m uvicorn web:app --host 0.0.0.0 --port 8000
 python -m uvicorn online:app --host 0.0.0.0 --port 8000
 ```
 
-Set `OLLAMA_HOST` and `OLLAMA_API_KEY` as appropriate before starting. The hosted app needs a persistent writable disk for its database, uploads, and transcription model cache in a production deployment. Its video/audio transcription runs on CPU and may be slower than local GPU processing. Study Sloth Online stores active jobs and results in memory, so they are temporary and may not survive a service restart.
+Set `OLLAMA_HOST` and `OLLAMA_API_KEY` as appropriate before starting. To use hosted audio/video transcription, set `GROQ_API_KEY`; the default model is `whisper-large-v3-turbo`, and direct uploads are limited to 25 MB. Study Sloth Online stores active jobs and results in memory, so they are temporary and may not survive a service restart.
 
 ## Configuration and privacy
 
@@ -193,7 +204,8 @@ Set `OLLAMA_HOST` and `OLLAMA_API_KEY` as appropriate before starting. The hoste
 - `SLOTH_UPLOAD_DIR` selects the upload directory for the full app.
 - `OLLAMA_HOST` and `OLLAMA_API_KEY` configure the model API endpoint.
 - `SLOTH_MODEL` and `SLOTH_VISION_MODEL` select the text and image models.
-- `SLOTH_WHISPER` selects the faster-whisper model size used for local or hosted transcription.
+- `SLOTH_WHISPER` selects the local faster-whisper model size.
+- `GROQ_API_KEY` and `GROQ_TRANSCRIPTION_MODEL` configure hosted audio/video transcription.
 
 The hosted workspace separates browser workspaces using a browser cookie; it does **not** provide user accounts or a sign-in system. Do not treat it as an authenticated private vault. For a public deployment, configure quotas and operational monitoring, secure provider credentials, and publish a privacy notice that matches your actual hosting and model-provider setup.
 
@@ -204,6 +216,7 @@ Study-Sloth/
 ├── app/
 │   ├── main.py                 # Local application API and routes
 │   ├── pipeline.py             # Study-material processing workflows
+│   ├── hosted_transcription.py # Groq speech-to-text integration
 │   ├── llm.py                  # Ollama-compatible model client
 │   ├── db.py                   # SQLite schema and database helpers
 │   └── static/                 # Local application interface and logo

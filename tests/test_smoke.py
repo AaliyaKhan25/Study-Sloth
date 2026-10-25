@@ -45,6 +45,77 @@ def test_transcribe_retries_on_cpu_when_cuda_library_is_missing():
     whisper_model.assert_called_once_with("small", device="cpu", compute_type="int8")
     assert progress == [(0.5, "Transcribing")]
 
+def test_hosted_transcription_uses_groq_and_returns_timestamps(tmp_path, monkeypatch):
+    from app import hosted_transcription
+
+    audio_file = tmp_path / "lecture.mp4"
+    audio_file.write_bytes(b"media")
+    monkeypatch.setenv("GROQ_API_KEY", "test-api-key")
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "text": "Hello world",
+                "segments": [
+                    {"start": 61.2, "text": " Hello world "},
+                    {"start": 90, "text": ""},
+                ],
+            }
+
+    progress = []
+    with mock.patch.object(hosted_transcription.httpx, "post", return_value=Response()) as request:
+        lines = hosted_transcription.transcribe(str(audio_file), lambda *args: progress.append(args))
+
+    assert lines == ["[01:01] Hello world"]
+    assert request.call_args.args[0] == hosted_transcription.TRANSCRIPTION_URL
+    assert request.call_args.kwargs["headers"] == {"Authorization": "Bearer test-api-key"}
+    assert request.call_args.kwargs["data"]["model"] == "whisper-large-v3-turbo"
+    assert progress == [(0.05, "Uploading lecture for transcription"), (0.5, "Transcription complete")]
+
+def test_hosted_transcription_requires_groq_key(monkeypatch, tmp_path):
+    from app import hosted_transcription
+
+    audio_file = tmp_path / "lecture.mp4"
+    audio_file.write_bytes(b"media")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
+        hosted_transcription.transcribe(str(audio_file), lambda *args: None)
+
+def test_hosted_transcription_rejects_recordings_over_groq_limit(monkeypatch, tmp_path):
+    from app import hosted_transcription
+
+    audio_file = tmp_path / "large.mp4"
+    with audio_file.open("wb") as recording:
+        recording.seek(hosted_transcription.MAX_FILE_BYTES)
+        recording.write(b"x")
+    monkeypatch.setenv("GROQ_API_KEY", "test-api-key")
+
+    with mock.patch.object(hosted_transcription.httpx, "post") as request:
+        with pytest.raises(RuntimeError, match="25 MB upload limit"):
+            hosted_transcription.transcribe(str(audio_file), lambda *args: None)
+    request.assert_not_called()
+
+def test_unmounted_render_disk_paths_fall_back_with_warning(monkeypatch, caplog):
+    import web
+
+    monkeypatch.setattr(web.os, "access", lambda path, mode: False)
+    monkeypatch.setenv("SLOTH_DB", "/var/data/template.db")
+    monkeypatch.setenv("SLOTH_UPLOAD_DIR", "/var/data/uploads")
+    monkeypatch.setenv("HF_HOME", "/var/data/huggingface")
+
+    web._clear_unmounted_disk_paths()
+
+    assert "SLOTH_DB" not in os.environ
+    assert "SLOTH_UPLOAD_DIR" not in os.environ
+    assert "HF_HOME" not in os.environ
+    assert "using temporary service storage" in caplog.text
+
 def test_hosted_app_keeps_lecture_transcription_enabled(monkeypatch):
     from app import main
     import web

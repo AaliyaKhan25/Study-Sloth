@@ -2,7 +2,28 @@
 Start:  python -m uvicorn web:app --host 0.0.0.0 --port $PORT      (no password needed)"""
 import os, re, uuid, time, shutil, sqlite3, threading, collections, contextvars
 import concurrent.futures as cf
+import logging
 
+def _clear_unmounted_disk_paths(mount_path="/var/data"):
+    if os.access(mount_path, os.W_OK):
+        return
+    mount_root = mount_path.rstrip("/")
+    prefix = mount_root + "/"
+    keys = ("SLOTH_DB", "SLOTH_UPLOAD_DIR", "HF_HOME")
+    removed = [
+        key for key in keys
+        if os.environ.get(key, "") == mount_root or os.environ.get(key, "").startswith(prefix)
+    ]
+    for key in removed:
+        os.environ.pop(key, None)
+    if removed:
+        logging.warning(
+            "Render disk %s is not writable; using temporary service storage instead. "
+            "Workspace data and uploads will not persist across restarts.",
+            mount_path,
+        )
+
+_clear_unmounted_disk_paths()
 os.environ.setdefault("SLOTH_DB", "data/hosted/template.db")      # keeps hosted data apart from your own notes
 
 # Background jobs must run inside the visitor's workspace, so copy the context into worker threads.
@@ -14,6 +35,8 @@ cf.ThreadPoolExecutor.submit = _submit
 from fastapi import Request
 from fastapi.responses import Response, JSONResponse
 from app import db
+import app.pipeline as pl
+from app.hosted_transcription import transcribe as groq_transcribe
 from app.main import app
 
 WS = contextvars.ContextVar("ws", default="")
@@ -30,6 +53,7 @@ def _conn():
     c = sqlite3.connect(path, check_same_thread=False); c.row_factory = sqlite3.Row
     return c
 db.conn = _conn
+pl.transcribe = groq_transcribe
 
 PER_HOUR = int(os.environ.get("SLOTH_UPLOADS_PER_HOUR", 8))     # per visitor
 PER_DAY = int(os.environ.get("SLOTH_UPLOADS_PER_DAY", 250))     # in total, protects your model quota
@@ -50,7 +74,7 @@ LABELS = {   # the page says "local"; the hosted version is not, so say what rea
     "Private by design": "Hosted demo",
     "Local workspace · just for you": "Your own private workspace",
     "On-device processing": "Processed by an open model (Ollama Cloud)",
-    "Audio stays on this computer": "Lecture audio is processed on the hosted server",
+    "Audio stays on this computer": "Lecture audio is sent to Groq for transcription",
     "PDF stays on this computer": "PDF text is sent to Ollama Cloud",
     "Parsed and organized locally": "Processed by an open model (Ollama Cloud)",
     "Local model · your code is never generated": "Your code and output are never generated",
