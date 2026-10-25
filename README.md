@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/static/study-sloth-logo.png" alt="Study Sloth, a sloth studying at a desk" width="180">
+</p>
+
 <div align="center">
 
 # Study Sloth
