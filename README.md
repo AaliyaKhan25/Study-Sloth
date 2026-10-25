@@ -62,7 +62,7 @@ The hosted and online experiences have different capabilities from the local app
 | Study cards and quizzes | Yes | Yes | Yes |
 | Per-browser hosted workspace | — | Yes | — |
 
-The hosted variants use Ollama Cloud for study-content generation. Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
+The hosted variants use Ollama Cloud for study-content generation (`gemma4:cloud` by default in Render). Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
 
 ## Interface
 
@@ -134,20 +134,20 @@ Study Sloth uses the Ollama chat API and lets you select the text and vision mod
 | --- | --- | --- |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama-compatible API endpoint |
 | `OLLAMA_API_KEY` | Empty | API key for a hosted Ollama provider |
-| `SLOTH_MODEL` | `gemma3:4b` | Text-generation model |
+| `SLOTH_MODEL` | `gemma4:cloud` | Text-generation model |
 | `SLOTH_VISION_MODEL` | `qwen3-vl:4b-instruct` | Model used when an image is included |
 | `SLOTH_WHISPER` | `small` | Local faster-whisper model size |
 | `GROQ_API_KEY` | Empty | Secret API key for hosted audio/video transcription |
 | `GROQ_TRANSCRIPTION_MODEL` | `whisper-large-v3-turbo` | Groq speech-to-text model |
 
-**Gemma:** Study Sloth uses Gemma 3 4B (`gemma3:4b`) as its default text-generation model, including in the Render Blueprint. For a local run:
+**Gemma:** Local Study Sloth defaults to Gemma 3 4B (`gemma3:4b`); Render uses the cloud model identifier `gemma4:cloud`. For a local run:
 
 ```powershell
 ollama pull gemma3:4b
 $env:SLOTH_MODEL = "gemma3:4b"
 ```
 
-The vision model has its own setting, `SLOTH_VISION_MODEL`, and remains Qwen 3 VL by default. For a Gemma-focused deployment, set `SLOTH_MODEL=gemma3:4b` on the Render service. Confirm your Ollama Cloud account provides access to this model before deployment.
+The vision model has its own setting, `SLOTH_VISION_MODEL`, and remains Qwen 3 VL by default. For Render, set `SLOTH_MODEL=gemma4:cloud` and confirm the model is available to your Ollama Cloud account. The cloud model identifier differs from the local Ollama model tag.
 
 GitHub Copilot was used as an AI development assistant during implementation. It is not required to run Study Sloth.
 
@@ -174,7 +174,7 @@ Build:  pip install -r requirements-web.txt
 Start:  uvicorn web:app --host 0.0.0.0 --port $PORT
 ```
 
-Leave **Root Directory** blank. Set `OLLAMA_HOST=https://ollama.com`, `OLLAMA_API_KEY` (secret), `SLOTH_MODEL=gemma3:4b`, `SLOTH_VISION_MODEL=qwen3-vl:4b-instruct`, `GROQ_API_KEY` (secret), and `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`. Do not set the old `/var/data` paths (`SLOTH_DB`, `SLOTH_UPLOAD_DIR`, or `HF_HOME`) on a free service without a disk.
+Leave **Root Directory** blank. Set `OLLAMA_HOST=https://ollama.com`, `OLLAMA_API_KEY` (secret), `SLOTH_MODEL=gemma4:cloud`, `SLOTH_VISION_MODEL=qwen3-vl:4b-instruct`, `GROQ_API_KEY` (secret), and `GROQ_TRANSCRIPTION_MODEL=whisper-large-v3-turbo`. Do not set the old `/var/data` paths (`SLOTH_DB`, `SLOTH_UPLOAD_DIR`, or `HF_HOME`) on a free service without a disk.
 
 For the step-by-step checklist, see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
@@ -255,7 +255,7 @@ Contributions are welcome. A good contribution keeps the workflows clear, handle
 ## Acknowledgments
 
 - **GitHub Copilot** — AI-assisted software development.
-- **Gemma 3 4B** — the default text-generation model, served through Ollama.
+- **Gemma** — Gemma 3 4B for local Ollama by default and Gemma 4 Cloud for the Render configuration.
 - **Ollama** — local and hosted model API integration.
 - **Render** — deployment target configured for the hosted services.
 - **`.tech`** — the project domain selected for the planned public presence: `studysloth.tech`.

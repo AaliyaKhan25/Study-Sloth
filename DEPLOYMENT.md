@@ -27,12 +27,12 @@ Both services use Render's free web-service plan. The full app sends audio/video
    | `PYTHON_VERSION` | `3.12.11` |
    | `OLLAMA_HOST` | `https://ollama.com` |
    | `OLLAMA_API_KEY` | Your Ollama Cloud API key (secret) |
-   | `SLOTH_MODEL` | `gemma3:4b` |
+   | `SLOTH_MODEL` | `gemma4:cloud` |
    | `SLOTH_VISION_MODEL` | `qwen3-vl:4b-instruct` |
    | `GROQ_API_KEY` | Your Groq API key (secret) |
    | `GROQ_TRANSCRIPTION_MODEL` | `whisper-large-v3-turbo` |
 
-   Confirm the selected models and current usage limits are available to your accounts.
+   Confirm the selected models and current usage limits are available to your accounts. For Ollama Cloud, use a model listed in its Cloud catalog (for example, `gemma4:cloud`), rather than a local-only tag such as `gemma3:4b`.
 5. Do **not** add a disk or set the old `/var/data` values for `SLOTH_DB`, `SLOTH_UPLOAD_DIR`, or `HF_HOME` on this free service. The app uses default writable filesystem paths, which are temporary on Render Free.
 6. Deploy and check the service URL. AI and transcription requests require valid provider keys and available quotas.
 

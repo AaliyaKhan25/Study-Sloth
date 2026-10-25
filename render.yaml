@@ -15,7 +15,7 @@ services:
       - key: OLLAMA_API_KEY
         sync: false
       - key: SLOTH_MODEL
-        value: gemma3:4b
+        value: gemma4:cloud
       - key: SLOTH_VISION_MODEL
         value: qwen3-vl:4b-instruct
 
@@ -35,7 +35,7 @@ services:
       - key: OLLAMA_API_KEY
         sync: false
       - key: SLOTH_MODEL
-        value: gemma3:4b
+        value: gemma4:cloud
       - key: SLOTH_VISION_MODEL
         value: qwen3-vl:4b-instruct
       - key: GROQ_API_KEY

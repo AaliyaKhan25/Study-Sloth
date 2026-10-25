@@ -13,6 +13,20 @@ FAKE = {"units": [{"name": "Unit 1: Joins", "topics": ["inner"]}], "aim": "A", "
         "quiz": [{"q": "Which join keeps matching rows?", "options": ["INNER", "CROSS"], "answer": 0}],
         "viva": [{"q": "why?", "a": "x"}]}
 
+def test_ollama_cloud_410_explains_cloud_model_setting(monkeypatch):
+    import httpx
+    import app.llm as llm
+
+    response = mock.Mock(status_code=410, text="Gone")
+    response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "410 Gone", request=mock.Mock(), response=response
+    )
+    monkeypatch.setattr(llm, "HOST", "https://ollama.com")
+
+    with mock.patch.object(llm.httpx, "post", return_value=response):
+        with pytest.raises(RuntimeError, match="gemma4:cloud"):
+            llm.chat("test prompt")
+
 def test_transcribe_reports_incompatible_pyav():
     class IncompatibleDecoder:
         def transcribe(self, path, **options):

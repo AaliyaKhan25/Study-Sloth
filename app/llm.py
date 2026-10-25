@@ -24,7 +24,16 @@ def chat(prompt, system="", images=None, json_mode=False, **opts):
     if r.status_code == 400 and "think" in r.text.lower():     # this model does not accept the think option
         body.pop("think")
         r = httpx.post(f"{HOST}/api/chat", json=body, headers=headers, timeout=timeout)
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 410 and HOST == "https://ollama.com":
+            raise RuntimeError(
+                "Ollama Cloud no longer provides this model at the requested endpoint. "
+                "In Render, set SLOTH_MODEL to a currently listed cloud model such as gemma4:cloud, "
+                "then redeploy."
+            ) from exc
+        raise
     return _clean(r.json()["message"]["content"])
 
 def chat_json(prompt, **kw):
