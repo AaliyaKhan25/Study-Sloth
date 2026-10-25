@@ -22,7 +22,7 @@ services:
   - type: web
     name: study-sloth-hosted
     runtime: python
-    plan: starter
+    plan: standard
     buildCommand: pip install -r requirements-web.txt
     startCommand: uvicorn web:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
@@ -30,7 +30,7 @@ services:
     disk:
       name: study-sloth-data
       mountPath: /var/data
-      sizeGB: 1
+      sizeGB: 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
@@ -38,6 +38,10 @@ services:
         value: /var/data/template.db
       - key: SLOTH_UPLOAD_DIR
         value: /var/data/uploads
+      - key: HF_HOME
+        value: /var/data/huggingface
+      - key: SLOTH_WHISPER
+        value: small
       - key: OLLAMA_HOST
         value: https://ollama.com
       - key: OLLAMA_API_KEY

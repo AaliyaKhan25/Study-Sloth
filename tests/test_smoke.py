@@ -45,6 +45,25 @@ def test_transcribe_retries_on_cpu_when_cuda_library_is_missing():
     whisper_model.assert_called_once_with("small", device="cpu", compute_type="int8")
     assert progress == [(0.5, "Transcribing")]
 
+def test_hosted_app_keeps_lecture_transcription_enabled(monkeypatch):
+    from app import main
+    import web
+
+    submitted = []
+    monkeypatch.setattr(main, "save", lambda file: "lecture.mp4")
+    monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
+
+    with TestClient(web.app) as client:
+        sid = client.post("/api/subjects", data={"name": "Hosted course"}).json()["id"]
+        response = client.post(
+            f"/api/subjects/{sid}/lectures",
+            data={"title": "Hosted lecture"},
+            files={"file": ("lecture.mp4", b"media", "video/mp4")},
+        )
+
+    assert response.status_code == 200
+    assert submitted[0][2] is pl.lecture_job
+
 def test_lab_manual_requires_actual_outputs_before_final_print():
     from app import db
     from app.main import app

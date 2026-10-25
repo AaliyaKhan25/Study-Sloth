@@ -14,7 +14,6 @@ cf.ThreadPoolExecutor.submit = _submit
 from fastapi import Request
 from fastapi.responses import Response, JSONResponse
 from app import db
-import app.pipeline as pl
 from app.main import app
 
 WS = contextvars.ContextVar("ws", default="")
@@ -31,10 +30,6 @@ def _conn():
     c = sqlite3.connect(path, check_same_thread=False); c.row_factory = sqlite3.Row
     return c
 db.conn = _conn
-
-def _no_audio(*a, **k):
-    raise RuntimeError("Lecture recordings are processed in the local version of Study Sloth. Here, use PDF notes, a syllabus or lab code.")
-if hasattr(pl, "transcribe"): pl.transcribe = _no_audio
 
 PER_HOUR = int(os.environ.get("SLOTH_UPLOADS_PER_HOUR", 8))     # per visitor
 PER_DAY = int(os.environ.get("SLOTH_UPLOADS_PER_DAY", 250))     # in total, protects your model quota
@@ -55,14 +50,14 @@ LABELS = {   # the page says "local"; the hosted version is not, so say what rea
     "Private by design": "Hosted demo",
     "Local workspace · just for you": "Your own private workspace",
     "On-device processing": "Processed by an open model (Ollama Cloud)",
-    "Audio stays on this computer": "Lecture audio needs the local version",
+    "Audio stays on this computer": "Lecture audio is processed on the hosted server",
     "PDF stays on this computer": "PDF text is sent to Ollama Cloud",
     "Parsed and organized locally": "Processed by an open model (Ollama Cloud)",
     "Local model · your code is never generated": "Your code and output are never generated",
     "Powered locally on your computer": "Open-source models via Ollama Cloud",
     "Your local models will handle the busywork.": "An open model will handle the busywork.",
     "all from your own computer": "with nothing to install",
-    "Turn a lecture into notes": "Turn a lecture into notes (local version)"}
+    "Turn a lecture into notes": "Turn a lecture into notes"}
 
 def relabel(html):
     i, j = html.lower().find("<html"), html.lower().rfind("</html>")
