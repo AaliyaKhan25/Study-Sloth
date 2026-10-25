@@ -1,4 +1,5 @@
-import os, re, json
+import os, re, json, sys
+from pathlib import Path
 from . import db
 from .llm import chat, chat_json
 
@@ -106,11 +107,37 @@ def pdf_notes_job(doc_id, path, p):
 def transcribe(path, p):
     global _wm
     from faster_whisper import WhisperModel
+    size = os.environ.get("SLOTH_WHISPER", "small")
     if _wm is None:
-        size = os.environ.get("SLOTH_WHISPER", "small")
         try: _wm = WhisperModel(size, device="cuda", compute_type="float16")   # NVIDIA GPU
         except Exception: _wm = WhisperModel(size, device="cpu", compute_type="int8")
-    segs, info = _wm.transcribe(path, vad_filter=True)
+
+    def decode(model):
+        segments, info = model.transcribe(path, vad_filter=True)
+        return list(segments), info
+
+    try:
+        segs, info = decode(_wm)
+    except TypeError as exc:
+        if "metadata_errors" in str(exc):
+            requirements = Path(__file__).resolve().parent.parent / "requirements.txt"
+            raise RuntimeError(
+                "The installed PyAV version is incompatible with faster-whisper. "
+                f'Update the Python running Study Sloth: "{sys.executable}" -m pip install '
+                f'--upgrade -r "{requirements}", then restart Study Sloth.'
+            ) from exc
+        raise
+    except Exception as exc:
+        error = str(exc).lower()
+        missing_cuda_library = (
+            any(library in error for library in ("cublas", "cudnn", "cuda"))
+            and any(message in error for message in ("not found", "cannot be loaded"))
+        )
+        if not missing_cuda_library:
+            raise
+        _wm = WhisperModel(size, device="cpu", compute_type="int8")
+        segs, info = decode(_wm)
+
     lines = []
     for s in segs:
         lines.append(f"[{int(s.start // 60):02d}:{int(s.start % 60):02d}] {s.text.strip()}")
@@ -205,12 +232,143 @@ def lab_job(lid, img_path, p):
     rel = related(lab["subject_id"], lab["title"] + " " + lab["code"])
     ctx = "\n".join(f"[{t} @ {pt.get('ts','?')}] {pt.get('heading','')}: {pt.get('text','')}" for _, t, pt in rel) or "(no lecture notes yet)"
     p(0.6, "Writing the record")
-    r = chat_json(f'Write a lab record. Experiment: {lab["title"]}\n\nLECTURE NOTES (use for theory):\n{ctx}\n\nCODE:\n{lab["code"][:4000]}\n\nOUTPUT FROM THE STUDENT\'S REAL RUN:\n{lab["output"][:2000]}\n\nRules: the conclusion may only refer to what the output above shows; never invent results or numbers. Return JSON: {{"aim":"","theory":"","procedure":["step"],"conclusion":"","viva":[{{"q":"","a":""}}] (4, about why the code is written this way)}}', system=SYS)
+    r = chat_json(f'Write a lab record. Experiment: {lab["title"]}\n\nLECTURE NOTES (use for theory):\n{ctx}\n\nCODE:\n{lab["code"][:4000]}\n\nOUTPUT FROM THE STUDENT\'S REAL RUN:\n{lab["output"][:2000]}\n\nRules: the conclusion may only refer to what the output above shows; never invent results or numbers. Return JSON: {{"aim":"","theory":"","procedure":["step"],"conclusion":"","flashcards":[{{"q":"","a":""}}] (5 cards about the experiment and supplied code),"quiz":[{{"q":"","options":["","","",""],"answer":0}}] (3 questions, answer is option index),"viva":[{{"q":"","a":""}}] (4, about why the code is written this way)}}', system=SYS)
+    flashcards = r.get("flashcards", [])
+    if not isinstance(flashcards, list) or not any(
+        isinstance(card, dict) and card.get("q") and card.get("a") for card in flashcards
+    ):
+        raise RuntimeError("The local model did not return lab flashcards.")
     rec = {"aim": r.get("aim", ""), "theory": r.get("theory", ""), "conclusion": r.get("conclusion", ""),
            "procedure": "\n".join(map(str, r.get("procedure", []))),
            "sources": sorted({f"{t} @ {pt.get('ts','?')}" for _, t, pt in rel})}
     db.x("update labs set record=?, reviewed=0 where id=?", (json.dumps(rec), lid))
     db.x("delete from cards where lab_id=?", (lid,))
+    for card in flashcards:
+        if isinstance(card, dict) and card.get("q") and card.get("a"):
+            db.x("insert into cards(subject_id,lab_id,kind,q,a) values(?,?,'flash',?,?)",
+                 (lab["subject_id"], lid, str(card["q"]), str(card["a"])))
+    for card in r.get("quiz", []):
+        if not isinstance(card, dict) or not card.get("q"):
+            continue
+        options = card.get("options", [])
+        answer = card.get("answer", -1)
+        if not isinstance(options, list) or len(options) < 2 or not isinstance(answer, int) or not 0 <= answer < len(options):
+            continue
+        extra = json.dumps({"options": options, "answer": answer})
+        db.x("insert into cards(subject_id,lab_id,kind,q,a,extra) values(?,?,'quiz',?,'',?)",
+             (lab["subject_id"], lid, str(card["q"]), extra))
     for c in r.get("viva", []):
         if isinstance(c, dict) and c.get("q"):
             db.x("insert into cards(subject_id,lab_id,kind,q,a) values(?,?,'viva',?,?)", (lab["subject_id"], lid, c["q"], str(c.get("a", ""))))
+
+def lab_manual_job(manual_id, p):
+    manual = db.q("select * from lab_manuals where id=?", (manual_id,))[0]
+    titles = json.loads(manual["experiments"])
+    records = []
+    for i, title in enumerate(titles):
+        p(0.1 + 0.8 * i / len(titles), f"Drafting experiment {i + 1}/{len(titles)}")
+        rel = related(manual["subject_id"], title)
+        notes = "\n".join(
+            f"{source}: {pt.get('heading', '')} — {pt.get('text', '')}"
+            for _, source, pt in rel
+        ) or "(No course notes available; use general knowledge and state assumptions.)"
+        result = chat_json(
+            f'Create a careful educational lab-manual draft for this experiment: {title}\n'
+            f'Course notes, if relevant:\n{notes[:5000]}\n\n'
+            "Return JSON with these fields: aim (string), theory (string), materials (array of strings), "
+            "procedure (array of numbered steps as strings), reference_code (string, may be empty if code "
+            "language is unclear), expected_output (string), expected_observation (string), "
+            "flashcards (array of 4 {q, a} objects), quiz (array of 3 {q, options, answer} objects; "
+            "options must contain 4 choices and answer is the correct zero-based index), "
+            "viva (array of {q, a} objects, 3 items). Make assumptions explicit. The code and expected "
+            "output are illustrative examples only: do not claim that code was run, do not label expected "
+            "output as an actual result, and do not claim that any measurement or observation happened. "
+            "Use a small, understandable example. Keep content specific to the experiment title.",
+            system=("You are preparing a draft study aid, not certifying experiment results. "
+                    "Never claim to have run code or observed results. Clearly distinguish suggested "
+                    "examples from actual student work."),
+        )
+        required = ("aim", "theory", "expected_output", "expected_observation")
+        if not isinstance(result, dict) or any(not str(result.get(key, "")).strip() for key in required):
+            raise RuntimeError(f"The local model did not return a complete draft for experiment: {title}")
+        for key in ("materials", "procedure", "viva"):
+            if not isinstance(result.get(key, []), list):
+                raise RuntimeError(f"The local model returned invalid {key} for experiment: {title}")
+        for key in ("flashcards", "quiz"):
+            if not isinstance(result.get(key), list):
+                raise RuntimeError(f"The local model returned invalid {key} for experiment: {title}")
+        record = {
+            "title": title,
+            "aim": str(result["aim"]),
+            "theory": str(result["theory"]),
+            "materials": [str(item) for item in result.get("materials", []) if str(item).strip()],
+            "procedure": [str(item) for item in result.get("procedure", []) if str(item).strip()],
+            "reference_code": str(result.get("reference_code", "")),
+            "expected_output": str(result["expected_output"]),
+            "expected_observation": str(result["expected_observation"]),
+            "viva": [
+                {"q": str(item.get("q", "")), "a": str(item.get("a", ""))}
+                for item in result.get("viva", [])
+                if isinstance(item, dict) and item.get("q")
+            ],
+            "study": {
+                "flashcards": result["flashcards"],
+                "quiz": result["quiz"],
+            },
+        }
+        records.append(record)
+        db.x("update lab_manuals set experiments=? where id=?", (json.dumps(records), manual_id))
+    _store_manual_cards(manual_id, manual["subject_id"], records)
+    p(0.95, "Finishing manual draft")
+
+def _store_manual_cards(manual_id, subject_id, records):
+    db.x("delete from cards where manual_id=?", (manual_id,))
+    for record in records:
+        study = record.get("study", {})
+        for card in study.get("flashcards", []):
+            if isinstance(card, dict) and card.get("q") and card.get("a"):
+                db.x(
+                    "insert into cards(subject_id,manual_id,kind,q,a) values(?,?,'flash',?,?)",
+                    (subject_id, manual_id, f"{record['title']}: {card['q']}", str(card["a"])),
+                )
+        for card in study.get("quiz", []):
+            if not isinstance(card, dict) or not card.get("q"):
+                continue
+            options, answer = card.get("options"), card.get("answer", -1)
+            if not isinstance(options, list) or len(options) < 2 or not isinstance(answer, int) or not 0 <= answer < len(options):
+                continue
+            extra = json.dumps({"options": options, "answer": answer})
+            db.x(
+                "insert into cards(subject_id,manual_id,kind,q,a,extra) values(?,?,'quiz',?,'',?)",
+                (subject_id, manual_id, f"{record['title']}: {card['q']}", extra),
+            )
+
+def lab_manual_cards_job(manual_id, p):
+    manual = db.q("select * from lab_manuals where id=?", (manual_id,))[0]
+    records = json.loads(manual["experiments"])
+    study_material = "\n\n".join(
+        f"Experiment: {item.get('title', '')}\nAim: {item.get('aim', '')}\n"
+        f"Theory: {item.get('theory', '')}\nProcedure: {'; '.join(item.get('procedure', []))}\n"
+        f"Reference code: {item.get('reference_code', '')}\nExpected output: {item.get('expected_output', '')}"
+        for item in records
+    )
+    p(0.2, "Creating manual flashcards and quizzes")
+    result = chat_json(
+        "Create study-deck materials from these lab manual experiments. Return JSON with "
+        '"flashcards":[{"q":"","a":""}] (4 per experiment, based on the experiment concepts), '
+        '"quiz":[{"q":"","options":["","","",""],"answer":0}] (3 per experiment; answer is the '
+        "correct zero-based option index). Keep questions specific to the experiments and do not "
+        "invent experimental results.\n\n" + study_material[:9000],
+        system=SYS,
+    )
+    if not isinstance(result.get("flashcards"), list) or not isinstance(result.get("quiz"), list):
+        raise RuntimeError("The local model did not return manual flashcards and quizzes.")
+    for item in records:
+        item.pop("study", None)
+    records[0]["study"] = {
+        "flashcards": result["flashcards"],
+        "quiz": result["quiz"],
+    }
+    db.x("update lab_manuals set experiments=? where id=?", (json.dumps(records), manual_id))
+    _store_manual_cards(manual_id, manual["subject_id"], records)
+    p(0.9, "Adding cards to the study deck")

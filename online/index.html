@@ -1,0 +1,64 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#315747"><link rel="icon" href="study-sloth-logo.png"><title>Study Sloth · turn your notes into a study set</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light;--paper:#f6f9f6;--surface:#fff;--ink:#24372e;--muted:#637268;--forest:#315b43;--dark:#234532;--leaf:#e8f0e8;--sun:#d7a653;--sunp:#fbf2df;--coral:#bd684d;--line:#dfe7df}
+@media(prefers-color-scheme:dark){:root{color-scheme:light;--paper:#f6f9f6;--surface:#fff;--ink:#24372e;--muted:#637268;--forest:#315b43;--dark:#234532;--leaf:#e8f0e8;--sun:#d7a653;--sunp:#fbf2df;--coral:#bd684d;--line:#dfe7df}}
+:root{--error:#a7321f}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% -10%,rgba(215,166,83,.11),transparent 34%),var(--paper);color:var(--ink);font:16px/1.6 "Poppins",Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:860px;margin:0 auto;padding:26px clamp(16px,4vw,36px) 60px}
+h1,h2,h3{font-family:"Poppins",Inter,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:-.025em;line-height:1.15;margin:0 0 .4rem}
+p{color:var(--muted);margin:0 0 .8rem}
+.hero{display:flex;align-items:center;gap:20px;padding:clamp(20px,4vw,36px);border-radius:28px;background:linear-gradient(115deg,#f0f6ef,#f8faf6 58%,#fbf5e9);color:#263e31}
+.hero h1{font-size:clamp(1.8rem,5vw,2.8rem)}.hero p{color:#566a5b;margin:0}.hero img{width:clamp(80px,16vw,140px);height:clamp(80px,16vw,140px);border-radius:50%;object-fit:cover;border:5px solid rgba(255,255,255,.8);background:#fff8ed;flex:none}
+.box{margin-top:18px;padding:20px;border-radius:20px;background:var(--surface);border:1px solid var(--line)}
+label{display:block;font-weight:700;font-size:.9rem;margin:12px 0 5px}
+textarea,input[type=file]{width:100%;padding:10px 12px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:12px;font:inherit}
+textarea{min-height:90px}
+button.go{margin-top:14px;border:0;border-radius:12px;padding:12px 18px;background:var(--forest);color:#fffdf8;font:inherit;font-weight:800;cursor:pointer}
+button.go:disabled{opacity:.55;cursor:wait}
+:focus-visible{outline:3px solid var(--sun);outline-offset:3px}
+.small{font-size:.82rem;color:var(--muted)}.err{color:var(--error);font-weight:750}
+progress{width:100%;height:10px;accent-color:#315747;color-scheme:light;background:#fffdf8;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.k{font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;font-weight:800;color:var(--coral);margin:30px 0 4px}
+h2{font-size:1.6rem}h3{font-size:1.1rem;color:var(--forest);margin-top:16px}
+.item{padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);margin:8px 0}
+.ref{font-family:ui-monospace,monospace;font-size:.75rem;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.flash{min-height:96px;display:grid;place-items:center;text-align:center;padding:16px;border-radius:16px;border:1px solid var(--line);background:var(--leaf);color:var(--ink);font:inherit;cursor:pointer}
+.flash.flip{background:var(--sunp)}
+.opt{display:flex;gap:8px;font-weight:400;margin:6px 0}
+summary{cursor:pointer;font-weight:700}
+</style></head><body><main>
+<section class="hero"><img src="study-sloth-study-sloth-logo.png" alt="" onerror="this.style.display='none'"><div><h1>Turn your notes into a study set.</h1><p>Upload a PDF or paste text. Get a summary, notes by topic with page references, flashcards, a quiz and viva questions. Nothing to install.</p></div></section>
+<form id="f" class="box" onsubmit="go(event)">
+<label for="file">PDF or text file</label><input id="file" type="file" name="file" accept=".pdf,.txt,application/pdf,text/plain">
+<label for="text">Or paste your notes</label><textarea id="text" name="text" placeholder="Paste text here…"></textarea>
+<button id="go" class="go" type="submit">Make my study set</button>
+<div id="st" role="status" aria-live="polite" style="margin-top:12px"></div>
+<p class="small" style="margin:12px 0 0">Your text is sent to an open-weight model hosted by Ollama Cloud to write the notes. Nothing is saved on this site and results disappear after an hour. Text-based PDFs only, first 30 pages. Lecture recordings, board photos and lab records need the local version: <a href="https://github.com/AaliyaKhan25/Study-Sloth">GitHub</a>.</p></form>
+<div id="out"></div>
+<script>
+const $=s=>document.querySelector(s),esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let R=null;
+function status(m,bad,p){$('#st').innerHTML=m?(bad?`<span class="err">${esc(m)}</span>`:`${esc(m)}<br><progress value="${p||0}" max="1"></progress>`):''}
+async function go(e){e.preventDefault();const fd=new FormData($('#f')),b=$('#go');
+ if(!fd.get('file').size&&!fd.get('text').trim()){status('Choose a PDF or paste some text first.',true);return}
+ b.disabled=true;$('#out').innerHTML='';status('Uploading…');
+ try{const r=await fetch('/api/study',{method:'POST',body:fd}),j=await r.json();if(!r.ok)throw new Error(j.detail||'Something went wrong');poll(j.id)}catch(x){status(x.message,true);b.disabled=false}}
+async function poll(id){try{const r=await fetch('/api/study/'+id),j=await r.json();
+ if(!r.ok||j.status==='error'){status(j.message||j.detail,true);$('#go').disabled=false;return}
+ if(j.status==='done'){status('');$('#go').disabled=false;show(j.result);return}
+ status(j.message+'…',false,j.progress);setTimeout(()=>poll(id),1500)}catch(x){status('Lost the connection. Please try again.',true);$('#go').disabled=false}}
+function show(r){R=r;const g={};r.points.forEach(p=>(g[p.topic||'Notes']=g[p.topic||'Notes']||[]).push(p));
+ $('#out').innerHTML=`<div class="k">Summary</div><h2>${esc(r.name)}</h2>${r.note?`<p class="small">${esc(r.note)}</p>`:''}<div class="box"><ul style="margin:0;padding-left:20px">${r.summary.map(s=>`<li>${esc(s)}</li>`).join('')}</ul></div>
+ <div class="k">Notes by topic</div>${Object.entries(g).map(([t,ps])=>`<h3>${esc(t)}</h3>${ps.map(p=>`<div class="item"><b>${esc(p.heading)}</b> <span class="ref">${esc(p.ref)}</span><br>${esc(p.text)}</div>`).join('')}`).join('')}
+ <div class="k">Flashcards <span class="small">(tap to flip)</span></div><div class="cards">${r.flashcards.map((c,i)=>`<button class="flash" onclick="flip(${i},this)">${esc(c.q)}</button>`).join('')}</div>
+ <div class="k">Quick quiz</div>${r.quiz.map((q,i)=>`<div class="item"><b>${esc(q.q)}</b>${q.options.map((o,k)=>`<label class="opt"><input type="radio" name="q${i}" onchange="ans(${i},${k},this)"> ${esc(o)}</label>`).join('')}<div class="small" id="a${i}"></div></div>`).join('')}
+ <div class="k">Likely viva questions</div>${r.viva.map(v=>`<details class="item"><summary>${esc(v.q)}</summary><p style="margin:8px 0 0">${esc(v.a)}</p></details>`).join('')}`;
+ $('#out').scrollIntoView({behavior:'smooth'})}
+function flip(i,b){const on=b.classList.toggle('flip');b.textContent=on?R.flashcards[i].a:R.flashcards[i].q}
+function ans(i,k,el){const q=R.quiz[i],ok=k==q.answer;$('#a'+i).textContent=ok?'That is right.':'Not quite. Answer: '+(q.options[q.answer]??'')}
+</script></main></body></html>

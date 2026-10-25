@@ -7,18 +7,23 @@ VISION = os.environ.get("SLOTH_VISION_MODEL", "qwen3-vl:4b-instruct")
 def _clean(t):
     return re.sub(r"<think>.*?</think>", "", t, flags=re.S).strip()
 
-def chat(prompt, system="", images=None, json_mode=False):
+def chat(prompt, system="", images=None, json_mode=False, **opts):
+    """Extra keyword arguments (num_predict, temperature, num_ctx, ...) are passed to the model as options."""
+    think = opts.pop("think", False)
+    model = opts.pop("model", None)
+    timeout = opts.pop("timeout", 900)
+    options = {"temperature": 0.2, "num_ctx": 8192}
+    options.update({k: v for k, v in opts.items() if v is not None})
     msg = {"role": "user", "content": prompt}
     if images: msg["images"] = [base64.b64encode(i).decode() for i in images]
-    body = {"model": VISION if images else MODEL, "stream": False, "think": False,
-            "messages": [{"role": "system", "content": system}, msg],
-            "options": {"temperature": 0.2, "num_ctx": 8192}}
+    body = {"model": model or (VISION if images else MODEL), "stream": False, "think": think,
+            "messages": [{"role": "system", "content": system}, msg], "options": options}
     if json_mode: body["format"] = "json"
     headers = {"Authorization": f"Bearer {KEY}"} if KEY else {}
-    r = httpx.post(f"{HOST}/api/chat", json=body, headers=headers, timeout=900)
+    r = httpx.post(f"{HOST}/api/chat", json=body, headers=headers, timeout=timeout)
     if r.status_code == 400 and "think" in r.text.lower():     # this model does not accept the think option
         body.pop("think")
-        r = httpx.post(f"{HOST}/api/chat", json=body, headers=headers, timeout=900)
+        r = httpx.post(f"{HOST}/api/chat", json=body, headers=headers, timeout=timeout)
     r.raise_for_status()
     return _clean(r.json()["message"]["content"])
 
