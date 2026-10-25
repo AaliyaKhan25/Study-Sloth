@@ -104,9 +104,9 @@ If PowerShell blocks environment activation, run the project interpreter directl
 For a local Ollama model, install Ollama, download the model you want to use, and keep the default local endpoint:
 
 ```powershell
-ollama pull qwen3:4b
+ollama pull gemma3:4b
 $env:OLLAMA_HOST = "http://localhost:11434"
-$env:SLOTH_MODEL = "qwen3:4b"
+$env:SLOTH_MODEL = "gemma3:4b"
 ```
 
 To use Ollama Cloud instead, set the cloud endpoint and API key in the current PowerShell session. Never commit the key or paste it into source files:
@@ -134,18 +134,18 @@ Study Sloth uses the Ollama chat API and lets you select the text and vision mod
 | --- | --- | --- |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama-compatible API endpoint |
 | `OLLAMA_API_KEY` | Empty | API key for a hosted Ollama provider |
-| `SLOTH_MODEL` | `qwen3:4b` | Text-generation model |
+| `SLOTH_MODEL` | `gemma3:4b` | Text-generation model |
 | `SLOTH_VISION_MODEL` | `qwen3-vl:4b-instruct` | Model used when an image is included |
 | `SLOTH_WHISPER` | `small` | faster-whisper model size for transcription |
 
-**Gemma:** Gemma is part of the model ecosystem used with this project and can be selected through Ollama's model setting. For example, to try Gemma 3 4B locally:
+**Gemma:** Study Sloth uses Gemma 3 4B (`gemma3:4b`) as its default text-generation model, including in the Render Blueprint. For a local run:
 
 ```powershell
 ollama pull gemma3:4b
 $env:SLOTH_MODEL = "gemma3:4b"
 ```
 
-The current code and Render Blueprint default to Qwen 3 4B for text generation; Gemma is configurable rather than the deployed default. The vision model has its own setting, `SLOTH_VISION_MODEL`.
+The vision model has its own setting, `SLOTH_VISION_MODEL`, and remains Qwen 3 VL by default. For a Gemma-focused deployment, set `SLOTH_MODEL=gemma3:4b` on the Render service. Confirm your Ollama Cloud account provides access to this model before deployment.
 
 GitHub Copilot was used as an AI development assistant during implementation. It is not required to run Study Sloth.
 
@@ -242,7 +242,7 @@ Contributions are welcome. A good contribution keeps the workflows clear, handle
 ## Acknowledgments
 
 - **GitHub Copilot** — AI-assisted software development.
-- **Gemma** — an available model option in the Ollama-configurable model layer.
+- **Gemma 3 4B** — the default text-generation model, served through Ollama.
 - **Ollama** — local and hosted model API integration.
 - **Render** — deployment target configured for the hosted services.
 - **`.tech`** — the project domain selected for the planned public presence: `studysloth.tech`.

@@ -1,7 +1,7 @@
 import httpx, json, base64, os, re
 HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")   # https://ollama.com for Ollama Cloud
 KEY = os.environ.get("OLLAMA_API_KEY", "")                                    # only needed for Ollama Cloud
-MODEL = os.environ.get("SLOTH_MODEL", "qwen3:4b")
+MODEL = os.environ.get("SLOTH_MODEL", "gemma3:4b")
 VISION = os.environ.get("SLOTH_VISION_MODEL", "qwen3-vl:4b-instruct")
 
 def _clean(t):

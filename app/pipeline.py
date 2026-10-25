@@ -80,12 +80,12 @@ def pdf_notes_job(doc_id, path, p):
     p(0.02, "Extracting PDF text")
     chunks = _pdf_chunks(path)
     if len(chunks) == 1:
-        p(0.08, "Summarizing PDF with local qwen3:4b")
+        p(0.08, "Summarizing PDF with local language model")
         summaries = [_pdf_notes_from_text(chunks[0], title, final=True)]
     else:
         summaries = []
         for i, chunk in enumerate(chunks):
-            p(0.05 + 0.6 * i / len(chunks), f"Summarizing section {i + 1}/{len(chunks)} with local qwen3:4b")
+            p(0.05 + 0.6 * i / len(chunks), f"Summarizing section {i + 1}/{len(chunks)} with local language model")
             summaries.append(_pdf_notes_from_text(chunk, title))
             p(0.05 + 0.6 * (i + 1) / len(chunks), f"Summarized section {i + 1}/{len(chunks)}")
     level = 0

@@ -13,7 +13,7 @@ The full hosted service needs the Standard instance for CPU-based Whisper transc
 
 1. Push this repository to a Git provider supported by Render.
 2. In Render, create a **Blueprint** from the repository and review the two services and their plans before applying it.
-3. For **both** services, set `OLLAMA_API_KEY` in the Render dashboard to a valid Ollama Cloud API key. It is a secret: do not put it in this repository. The Blueprint sets `OLLAMA_HOST` to `https://ollama.com`.
+3. For **both** services, set `OLLAMA_API_KEY` in the Render dashboard to a valid Ollama Cloud API key. It is a secret: do not put it in this repository. The Blueprint sets `OLLAMA_HOST` to `https://ollama.com` and `SLOTH_MODEL` to `gemma3:4b`. Confirm Gemma 3 4B is available to your Ollama Cloud account.
 4. Wait for both deploys to finish, then check each service URL. AI requests require a valid key and model access.
 
 The hosted app is the full browser-workspace version, including audio/video transcription. Whisper runs on the Render server using CPU; the first transcription may take longer while the model is downloaded and cached on the persistent disk. Its workspace data, uploads, and model cache are stored on that disk, but there is no account login; do not upload sensitive or confidential material. Processing runs on your Render service rather than on the student's device.
