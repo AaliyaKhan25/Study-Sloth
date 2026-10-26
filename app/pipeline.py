@@ -1,9 +1,11 @@
 import os, re, json, sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from . import db
 from .llm import chat, chat_json
 
 SYS = "You are a careful study assistant. Use ONLY the material given. If something is unclear, say so instead of guessing."
+MODEL_WORKERS = 2
 _wm = None
 
 def units_of(sid):
@@ -74,20 +76,30 @@ def _group_notes(parts, limit=4500):
     if current: groups.append(current)
     return groups
 
+def _parallel_map(items, worker, p, start, span, label):
+    if not items:
+        return []
+    results = [None] * len(items)
+    with ThreadPoolExecutor(max_workers=min(MODEL_WORKERS, len(items))) as executor:
+        futures = {executor.submit(worker, item): i for i, item in enumerate(items)}
+        for completed, future in enumerate(as_completed(futures), 1):
+            results[futures[future]] = future.result()
+            p(start + span * completed / len(items), f"{label} {completed}/{len(items)}")
+    return results
+
 def pdf_notes_job(doc_id, path, p):
-    doc = db.q("select title from pdf_notes where id=?", (doc_id,))[0]
+    doc = db.q("select title,subject_id from pdf_notes where id=?", (doc_id,))[0]
     title = doc["title"]
     p(0.02, "Extracting PDF text")
-    chunks = _pdf_chunks(path)
+    chunks = _pdf_chunks(path, limit=16000)
     if len(chunks) == 1:
         p(0.08, "Summarizing PDF with local language model")
         summaries = [_pdf_notes_from_text(chunks[0], title, final=True)]
     else:
-        summaries = []
-        for i, chunk in enumerate(chunks):
-            p(0.05 + 0.6 * i / len(chunks), f"Summarizing section {i + 1}/{len(chunks)} with local language model")
-            summaries.append(_pdf_notes_from_text(chunk, title))
-            p(0.05 + 0.6 * (i + 1) / len(chunks), f"Summarized section {i + 1}/{len(chunks)}")
+        summaries = _parallel_map(
+            chunks, lambda chunk: _pdf_notes_from_text(chunk, title), p, 0.05, 0.6,
+            "Summarized PDF section",
+        )
     level = 0
     while sum(map(len, summaries)) > 5000:
         if level >= 8: raise RuntimeError("Could not combine the PDF notes into a short summary.")
@@ -103,6 +115,8 @@ def pdf_notes_job(doc_id, path, p):
         p(0.94, "Writing final notes")
         notes = _pdf_notes_from_text("\n\n".join(summaries), title, final=True)
     db.x("update pdf_notes set notes=? where id=?", (notes, doc_id))
+    p(0.96, "Making flashcards and questions from PDF notes")
+    cards_from(doc["subject_id"], None, notes, pdf_note_id=doc_id)
 
 def transcribe(path, p):
     global _wm
@@ -157,12 +171,12 @@ def lecture_job(lid, path, p):
     lines = transcribe(path, p)
     p(0.5, "Transcription finished; preparing lecture notes")
     db.x("update lectures set transcript=? where id=?", ("\n".join(lines), lid))
-    pts, cs = [], list(chunks(lines, size=9000))
-    for i, c in enumerate(cs):
-        p(0.5 + 0.4 * i / max(len(cs), 1), f"Extracting notes {i + 1}/{len(cs)}")
+    cs = list(chunks(lines, size=14000))
+    def extract_points(c):
         r = chat_json(f'Units: {names}\nFrom this lecture transcript, extract the teaching points. Return JSON: {{"points":[{{"unit":"<one of the units above>","heading":"short","text":"1-3 sentences","ts":"MM:SS of the transcript line it came from"}}]}}\n\n{c}', system=SYS)
-        pts += [x for x in r.get("points", []) if isinstance(x, dict)]
-        p(0.5 + 0.4 * (i + 1) / max(len(cs), 1), f"Extracted notes {i + 1}/{len(cs)}")
+        return [x for x in r.get("points", []) if isinstance(x, dict)]
+    extracted = _parallel_map(cs, extract_points, p, 0.5, 0.4, "Extracted lecture chunk")
+    pts = [point for group in extracted for point in group]
     db.x("update lectures set points=? where id=?", (json.dumps(pts), lid))
     p(0.93, "Making flashcards and questions")
     cards_from(lec["subject_id"], lid, "\n".join(f"{x.get('heading','')}: {x.get('text','')}" for x in pts)[:6000])
@@ -174,24 +188,38 @@ def pdf_job(lid, path, p):
     p(0.1, "Reading PDF")
     pages = [f"[p.{i}]\n{(pg.extract_text() or '').strip()}" for i, pg in enumerate(PdfReader(path).pages, 1)]
     db.x("update lectures set transcript=? where id=?", ("\n\n".join(pages), lid))
-    pts, cs = [], list(chunks(pages, 3500))      # a few pages at a time, so nothing is cut off
-    for i, c in enumerate(cs):
-        p(0.15 + 0.75 * i / max(len(cs), 1), f"Writing notes {i + 1}/{len(cs)}")
+    cs = list(chunks(pages, 14000))
+    def extract_points(c):
         r = chat_json(f'Units: {names}\nThese are pages from the student\'s notes. Extract every teaching point. Keep every named item (tools, terms, formulas, steps) and do not skip or merge items. Return JSON: {{"points":[{{"unit":"<one of the units above>","heading":"short","text":"1-3 sentences","ts":"page, e.g. p.3"}}]}}\n\n{c}', system=SYS)
-        pts += [x for x in r.get("points", []) if isinstance(x, dict)]
+        return [x for x in r.get("points", []) if isinstance(x, dict)]
+    extracted = _parallel_map(cs, extract_points, p, 0.15, 0.75, "Extracted PDF section")
+    pts = [point for group in extracted for point in group]
     db.x("update lectures set points=? where id=?", (json.dumps(pts), lid))
     p(0.93, "Making flashcards and questions")
     cards_from(lec["subject_id"], lid, "\n".join(f"{x.get('heading','')}: {x.get('text','')}" for x in pts)[:6000])
 
 
-def cards_from(sid, lid, notes):
+def cards_from(sid, lid, notes, *, pdf_note_id=None):
     r = chat_json('From these notes make study material. Return JSON: {"flashcards":[{"q":"","a":""}] (8), "quiz":[{"q":"","options":["","","",""],"answer":0}] (5, answer is option index), "viva":[{"q":"","a":""}] (5)}\n\n' + notes, system=SYS)
-    db.x("delete from cards where lecture_id=?", (lid,))
+    flashcards = r.get("flashcards", [])
+    if not isinstance(flashcards, list) or not any(
+        isinstance(card, dict) and card.get("q") and card.get("a") for card in flashcards
+    ):
+        raise RuntimeError("The model did not return any flashcards for this study material.")
+    owner_column = "pdf_note_id" if pdf_note_id is not None else "lecture_id"
+    owner_id = pdf_note_id if pdf_note_id is not None else lid
+    db.x(f"delete from cards where {owner_column}=?", (owner_id,))
+    count = 0
     for k, key in (("flash", "flashcards"), ("quiz", "quiz"), ("viva", "viva")):
         for c in r.get(key, []):
             if isinstance(c, dict) and c.get("q"):
                 extra = json.dumps({"options": c.get("options", []), "answer": c.get("answer", 0)}) if k == "quiz" else ""
-                db.x("insert into cards(subject_id,lecture_id,kind,q,a,extra) values(?,?,?,?,?,?)", (sid, lid, k, c["q"], str(c.get("a", "")), extra))
+                db.x(
+                    f"insert into cards(subject_id,{owner_column},kind,q,a,extra) values(?,?,?,?,?,?)",
+                    (sid, owner_id, k, c["q"], str(c.get("a", "")), extra),
+                )
+                count += 1
+    return count
 
 def board_job(lid, path, p):
     lec = db.q("select * from lectures where id=?", (lid,))[0]

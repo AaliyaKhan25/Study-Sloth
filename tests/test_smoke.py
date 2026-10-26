@@ -152,6 +152,25 @@ def test_hosted_app_keeps_lecture_transcription_enabled(monkeypatch):
     assert response.status_code == 200
     assert submitted[0][2] is pl.lecture_job
 
+def test_pdf_upload_submits_notes_and_study_set_job(monkeypatch):
+    from app import main
+
+    submitted = []
+    monkeypatch.setattr(main, "save", lambda file: "reading.pdf")
+    monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
+
+    with TestClient(main.app) as client:
+        sid = client.post("/api/subjects", data={"name": "Biology"}).json()["id"]
+        response = client.post(
+            f"/api/subjects/{sid}/pdf-notes",
+            data={"title": "Cell biology"},
+            files={"file": ("cells.pdf", b"%PDF-test", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    assert submitted[0][0] == "pdf_notes"
+    assert submitted[0][2] is pl.pdf_notes_job
+
 def test_lecture_job_batches_notes_and_reports_completed_chunks():
     lines = [f"[00:00] {str(index).ljust(90, 'x')}" for index in range(200)]
     progress = []
@@ -165,11 +184,68 @@ def test_lecture_job_batches_notes_and_reports_completed_chunks():
             mock.patch.object(pl, "cards_from") as generate_cards:
         pl.lecture_job(1, "lecture.mp4", lambda value, message="": progress.append((value, message)))
 
-    assert generate_notes.call_count == 3
+    assert generate_notes.call_count == 2
     assert progress[0] == (0.5, "Transcription finished; preparing lecture notes")
-    assert progress[-3] == (pytest.approx(0.9 - 0.4 / 3), "Extracting notes 3/3")
-    assert progress[-2] == (pytest.approx(0.9), "Extracted notes 3/3")
+    assert any(message == "Extracted lecture chunk 2/2" for _, message in progress)
+    assert progress[-2] == (pytest.approx(0.9), "Extracted lecture chunk 2/2")
     generate_cards.assert_called_once()
+
+def test_pdf_notes_job_generates_flashcards_for_the_subject():
+    progress = []
+    with mock.patch.object(pl.db, "q", return_value=[{"title": "Cell biology", "subject_id": 7}]), \
+            mock.patch.object(pl.db, "x") as update_pdf, \
+            mock.patch.object(pl, "_pdf_chunks", return_value=["PDF source text"]), \
+            mock.patch.object(pl, "_pdf_notes_from_text", return_value="# Cell biology notes"), \
+            mock.patch.object(pl, "cards_from", return_value=18) as generate_cards:
+        pl.pdf_notes_job(12, "cells.pdf", lambda value, message="": progress.append((value, message)))
+
+    update_pdf.assert_called_once_with(
+        "update pdf_notes set notes=? where id=?", ("# Cell biology notes", 12)
+    )
+    generate_cards.assert_called_once_with(7, None, "# Cell biology notes", pdf_note_id=12)
+    assert progress[-1] == (0.96, "Making flashcards and questions from PDF notes")
+
+def test_pdf_flashcards_are_stored_with_their_pdf_source():
+    study_material = {
+        "flashcards": [{"q": "What is a cell?", "a": "The basic unit of life."}],
+        "quiz": [{"q": "Cells are?", "options": ["Living", "Rocks"], "answer": 0}],
+        "viva": [{"q": "Name one cell part.", "a": "Nucleus."}],
+    }
+    with mock.patch.object(pl, "chat_json", return_value=study_material), \
+            mock.patch.object(pl.db, "x") as store:
+        count = pl.cards_from(7, None, "# Cell notes", pdf_note_id=12)
+
+    assert count == 3
+    assert store.call_args_list[0].args == ("delete from cards where pdf_note_id=?", (12,))
+    inserts = [call.args for call in store.call_args_list[1:]]
+    assert all("subject_id,pdf_note_id,kind,q,a,extra" in args[0] for args in inserts)
+    assert all(args[1][0:2] == (7, 12) for args in inserts)
+
+def test_parallel_map_runs_only_a_small_bounded_batch_and_preserves_order():
+    import threading
+    import time
+
+    active = 0
+    maximum = 0
+    lock = threading.Lock()
+
+    def work(value):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.02)
+        with lock:
+            active -= 1
+        return value * 2
+
+    progress = []
+    assert pl._parallel_map(
+        [1, 2, 3, 4], work, lambda value, message: progress.append((value, message)),
+        0.0, 1.0, "Completed",
+    ) == [2, 4, 6, 8]
+    assert maximum == pl.MODEL_WORKERS == 2
+    assert progress[-1] == (1.0, "Completed 4/4")
 
 def test_lab_manual_requires_actual_outputs_before_final_print():
     from app import db

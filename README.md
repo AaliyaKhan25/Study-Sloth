@@ -40,7 +40,7 @@ The hosted and online experiences have different capabilities from the local app
 
 ### Learn from notes and lectures
 
-- Upload text-based PDFs and generate structured notes.
+- Upload text-based PDFs and generate structured notes, flashcards, quizzes, and viva questions.
 - Process lecture audio or video locally into a transcript and study notes.
 - Use board images as supporting lecture material.
 - Generate revision content such as flashcards, quizzes, and viva questions.
@@ -66,7 +66,7 @@ The hosted and online experiences have different capabilities from the local app
 | Study cards and quizzes | Yes | Yes | Yes |
 | Per-browser hosted workspace | — | Yes | — |
 
-The hosted variants use Ollama Cloud for study-content generation (`gemma4:cloud` by default in Render). Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
+The hosted variants use Ollama Cloud for study-content generation (`gemma4:cloud` by default in Render). Lecture transcript and PDF section requests are processed in small, bounded parallel batches to reduce serial waiting while limiting provider load. Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
 
 ## Interface
 
