@@ -39,6 +39,7 @@ import app.pipeline as pl
 from app.hosted_transcription import transcribe as groq_transcribe
 from app.main import app
 
+app.state.hosted = True
 WS = contextvars.ContextVar("ws", default="")
 TEMPLATE = os.path.abspath(db.DB)
 WSDIR = os.path.join(os.path.dirname(TEMPLATE), "workspaces"); os.makedirs(WSDIR, exist_ok=True)
@@ -74,7 +75,7 @@ LABELS = {   # the page says "local"; the hosted version is not, so say what rea
     "Private by design": "Hosted demo",
     "Local workspace · just for you": "Your own private workspace",
     "On-device processing": "Processed by an open model (Ollama Cloud)",
-    "Audio stays on this computer": "Lecture audio is sent to Groq for transcription",
+    "Audio stays on this computer": "Hosted audio/video is sent to Groq · 25 MB maximum",
     "PDF stays on this computer": "PDF text is sent to Ollama Cloud",
     "Scanned page images and PDF text are sent to the configured AI model": "PDF text and scanned page images are sent to Ollama Cloud",
     "Parsed and organized locally": "Processed by an open model (Ollama Cloud)",

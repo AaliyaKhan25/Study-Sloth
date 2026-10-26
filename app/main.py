@@ -5,8 +5,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 from . import db, pipeline as pl
 
 app = FastAPI(title="Study Sloth"); db.init()
+app.state.hosted = False
 db.x("update jobs set status='error',message='Interrupted by app restart' where status in ('queued','running')")
 UP = os.environ.get("SLOTH_UPLOAD_DIR", "data/uploads"); os.makedirs(UP, exist_ok=True)
+MAX_HOSTED_MEDIA_BYTES = 25_000_000
 pool = ThreadPoolExecutor(max_workers=1)   # one heavy job at a time on a laptop
 
 def save(f: UploadFile):
@@ -94,9 +96,16 @@ def pdf_note_study_cards(doc_id: int):
 
 @app.post("/api/subjects/{sid}/lectures")
 def lecture(sid: int, title: str = Form(...), file: UploadFile = File(...)):
-    lid = db.x("insert into lectures(subject_id,title) values(?,?)", (sid, title))
+    is_pdf = bool(file.filename and file.filename.lower().endswith(".pdf"))
+    if app.state.hosted and not is_pdf and file.size and file.size > MAX_HOSTED_MEDIA_BYTES:
+        raise HTTPException(
+            413,
+            "Hosted audio/video uploads must be 25 MB or smaller for Groq transcription. "
+            "Compress the video or upload a smaller audio file.",
+        )
     path = save(file)
-    submit("lecture", lid, pl.pdf_job if path.lower().endswith(".pdf") else pl.lecture_job, lid, path); return {"id": lid}
+    lid = db.x("insert into lectures(subject_id,title) values(?,?)", (sid, title))
+    submit("lecture", lid, pl.pdf_job if is_pdf else pl.lecture_job, lid, path); return {"id": lid}
 
 @app.get("/api/lectures/{lid}")
 def lecture_get(lid: int):

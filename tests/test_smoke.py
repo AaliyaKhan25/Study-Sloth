@@ -152,6 +152,47 @@ def test_hosted_app_keeps_lecture_transcription_enabled(monkeypatch):
     assert response.status_code == 200
     assert submitted[0][2] is pl.lecture_job
 
+def test_hosted_lecture_rejects_oversized_video_before_saving(monkeypatch):
+    from app import main
+    import web
+
+    submitted = []
+    monkeypatch.setattr(main.app.state, "hosted", True)
+    monkeypatch.setattr(main, "MAX_HOSTED_MEDIA_BYTES", 5)
+    monkeypatch.setattr(main, "save", lambda file: pytest.fail("oversized upload should not be saved"))
+    monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
+
+    with TestClient(web.app) as client:
+        sid = client.post("/api/subjects", data={"name": "Hosted course"}).json()["id"]
+        response = client.post(
+            f"/api/subjects/{sid}/lectures",
+            data={"title": "Large lecture"},
+            files={"file": ("lecture.mp4", b"too large", "video/mp4")},
+        )
+
+    assert response.status_code == 413
+    assert "25 MB or smaller" in response.json()["detail"]
+    assert submitted == []
+
+def test_local_lecture_upload_is_not_limited_to_hosted_groq_size(monkeypatch):
+    from app import main
+
+    submitted = []
+    monkeypatch.setattr(main.app.state, "hosted", False)
+    monkeypatch.setattr(main, "save", lambda file: "lecture.mp4")
+    monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
+
+    with TestClient(main.app) as client:
+        sid = client.post("/api/subjects", data={"name": "Local course"}).json()["id"]
+        response = client.post(
+            f"/api/subjects/{sid}/lectures",
+            data={"title": "Local lecture"},
+            files={"file": ("lecture.mp4", b"media", "video/mp4")},
+        )
+
+    assert response.status_code == 200
+    assert submitted[0][2] is pl.lecture_job
+
 def test_pdf_upload_submits_notes_and_study_set_job(monkeypatch):
     from app import main
 
