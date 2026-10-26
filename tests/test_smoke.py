@@ -224,6 +224,35 @@ def test_pdf_notes_job_generates_flashcards_for_the_subject():
     generate_cards.assert_called_once_with(7, None, "# Cell biology notes", pdf_note_id=12)
     assert progress[-1] == (0.96, "Making flashcards and questions from PDF notes")
 
+def test_pdf_note_cards_job_can_create_deck_from_existing_notes():
+    progress = []
+    with mock.patch.object(
+        pl.db, "q", return_value=[{"subject_id": 7, "notes": "Existing PDF notes"}]
+    ), mock.patch.object(pl, "cards_from", return_value=18) as generate_cards:
+        pl.pdf_note_cards_job(12, lambda value, message="": progress.append((value, message)))
+
+    generate_cards.assert_called_once_with(7, None, "Existing PDF notes", pdf_note_id=12)
+    assert progress[-1] == (0.9, "Added PDF cards to the Study deck")
+
+def test_pdf_note_cards_job_rejects_missing_notes():
+    with mock.patch.object(pl.db, "q", return_value=[{"subject_id": 7, "notes": ""}]):
+        with pytest.raises(RuntimeError, match="notes are not ready"):
+            pl.pdf_note_cards_job(12, lambda *args: None)
+
+def test_pdf_cards_endpoint_queues_deck_creation_for_existing_notes(monkeypatch):
+    from app import main
+
+    submitted = []
+    monkeypatch.setattr(main, "one", lambda *args: {"id": 12, "notes": "Existing notes"})
+    monkeypatch.setattr(main.db, "q", lambda *args: [])
+    monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
+
+    response = main.pdf_note_study_cards(12)
+
+    assert response == {"ok": 1}
+    assert submitted[0][0:3] == ("pdf_note_cards", 12, pl.pdf_note_cards_job)
+    assert submitted[0][3] == 12
+
 def test_scanned_pdf_pages_are_rendered_and_ocr_is_merged_in_page_order():
     import fitz
     from app import pdf_ocr

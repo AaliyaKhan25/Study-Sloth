@@ -129,6 +129,16 @@ def pdf_notes_job(doc_id, path, p):
     p(0.96, "Making flashcards and questions from PDF notes")
     cards_from(doc["subject_id"], None, notes, pdf_note_id=doc_id)
 
+def pdf_note_cards_job(doc_id, p):
+    doc = db.q("select subject_id,notes from pdf_notes where id=?", (doc_id,))[0]
+    if not doc["notes"].strip():
+        raise RuntimeError("PDF notes are not ready yet. Wait for note generation to finish.")
+    p(0.2, "Creating flashcards and questions from PDF notes")
+    count = cards_from(doc["subject_id"], None, doc["notes"], pdf_note_id=doc_id)
+    if not count:
+        raise RuntimeError("The model did not return study cards for this PDF.")
+    p(0.9, "Added PDF cards to the Study deck")
+
 def transcribe(path, p):
     global _wm
     from faster_whisper import WhisperModel

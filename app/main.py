@@ -44,7 +44,7 @@ def subject(sid: int):
     s = one("select * from subjects where id=?", (sid,)); s["units"] = json.loads(s["units"])
     return {"subject": s,
             "lectures": db.q("select id,title,length(transcript) as t from lectures where subject_id=?", (sid,)),
-            "pdf_notes": db.q("select n.id,n.title,n.source_name,length(n.notes) as note_chars,coalesce((select j.status from jobs j where j.kind='pdf_notes' and j.ref_id=n.id order by j.id desc limit 1),'done') as status from pdf_notes n where n.subject_id=? order by n.id desc", (sid,)),
+            "pdf_notes": db.q("select n.id,n.title,n.source_name,length(n.notes) as note_chars,(select count(*) from cards c where c.pdf_note_id=n.id) as card_count,coalesce((select j.status from jobs j where j.kind='pdf_notes' and j.ref_id=n.id order by j.id desc limit 1),'done') as status from pdf_notes n where n.subject_id=? order by n.id desc", (sid,)),
             "labs": db.q("select id,title,reviewed from labs where subject_id=?", (sid,)),
             "lab_manuals": db.q("select m.id,m.student_name,m.class_name,m.branch,m.experiment_count,(select count(*) from cards c where c.manual_id=m.id) as study_card_count,coalesce((select j.status from jobs j where j.kind='lab_manual' and j.ref_id=m.id order by j.id desc limit 1),'queued') as status,coalesce((select j.message from jobs j where j.kind='lab_manual' and j.ref_id=m.id order by j.id desc limit 1),'Waiting') as message from lab_manuals m where m.subject_id=? order by m.id desc", (sid,)),
             "cards": db.q("select * from cards where subject_id=? order by id", (sid,))}
@@ -75,6 +75,22 @@ def pdf_notes(sid: int, file: UploadFile = File(...), title: str = Form("")):
 @app.get("/api/pdf-notes/{doc_id}")
 def pdf_note_get(doc_id: int):
     return one("select id,title,source_name,notes from pdf_notes where id=?", (doc_id,))
+
+@app.post("/api/pdf-notes/{doc_id}/study-cards")
+def pdf_note_study_cards(doc_id: int):
+    doc = one("select id,notes from pdf_notes where id=?", (doc_id,))
+    if not doc["notes"].strip():
+        raise HTTPException(409, "Wait for PDF note generation to finish before creating study cards")
+    if db.q("select id from cards where pdf_note_id=? limit 1", (doc_id,)):
+        raise HTTPException(409, "Study cards already exist for this PDF")
+    jobs = db.q(
+        "select status from jobs where kind='pdf_note_cards' and ref_id=? order by id desc limit 1",
+        (doc_id,),
+    )
+    if jobs and jobs[0]["status"] in ("queued", "running"):
+        raise HTTPException(409, "Study cards are already being created for this PDF")
+    submit("pdf_note_cards", doc_id, pl.pdf_note_cards_job, doc_id)
+    return {"ok": 1}
 
 @app.post("/api/subjects/{sid}/lectures")
 def lecture(sid: int, title: str = Form(...), file: UploadFile = File(...)):
