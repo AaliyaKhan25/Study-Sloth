@@ -38,7 +38,7 @@ summary{cursor:pointer;font-weight:700}
 <label for="text">Or paste your notes</label><textarea id="text" name="text" placeholder="Paste text here…"></textarea>
 <button id="go" class="go" type="submit">Make my study set</button>
 <div id="st" role="status" aria-live="polite" style="margin-top:12px"></div>
-<p class="small" style="margin:12px 0 0">Your text is sent to an open-weight model hosted by Ollama Cloud to write the notes. Nothing is saved on this site and results disappear after an hour. Text-based PDFs only, first 30 pages. Lecture recordings, board photos and lab records need the local version: <a href="https://github.com/AaliyaKhan25/Study-Sloth">GitHub</a>.</p></form>
+<p class="small" style="margin:12px 0 0">PDF pages are read with selectable text or OCR for scanned pages (first 30 pages). Page images and extracted text are sent to the configured Ollama model to write the notes. Nothing is saved on this site and results disappear after an hour. Lecture recordings, board photos and lab records need the full app: <a href="https://github.com/AaliyaKhan25/Study-Sloth">GitHub</a>.</p></form>
 <div id="out"></div>
 <script>
 const $=s=>document.querySelector(s),esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

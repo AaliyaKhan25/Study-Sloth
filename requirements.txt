@@ -3,5 +3,6 @@ uvicorn
 python-multipart
 httpx
 pypdf
+PyMuPDF>=1.24,<2
 faster-whisper>=1.2.1
 av>=13.1.0,<14.0.0

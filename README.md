@@ -34,13 +34,13 @@ The hosted and online experiences have different capabilities from the local app
 
 ### Organize a course
 
-- Create subjects and add a syllabus as text or a file.
+- Create subjects and add a syllabus as text, a text-based PDF, or a scanned PDF.
 - Turn syllabus content into units and topics.
 - Keep course material and study resources grouped by subject.
 
 ### Learn from notes and lectures
 
-- Upload text-based PDFs and generate structured notes, flashcards, quizzes, and viva questions.
+- Upload PDFs, including scanned pages, and generate structured notes, flashcards, quizzes, and viva questions.
 - Process lecture audio or video locally into a transcript and study notes.
 - Use board images as supporting lecture material.
 - Generate revision content such as flashcards, quizzes, and viva questions.
@@ -66,7 +66,7 @@ The hosted and online experiences have different capabilities from the local app
 | Study cards and quizzes | Yes | Yes | Yes |
 | Per-browser hosted workspace | — | Yes | — |
 
-The hosted variants use Ollama Cloud for study-content generation (`gemma4:cloud` by default in Render). Lecture transcript and PDF section requests are processed in small, bounded parallel batches to reduce serial waiting while limiting provider load. Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
+The hosted variants use Ollama Cloud for study-content generation (`gemma4:cloud` by default in Render). Scanned PDF pages are rendered and sent to the configured vision model (`qwen3-vl:4b-instruct` by default in Render) for OCR; up to 30 image-only pages are OCRed per PDF by default. Lecture transcript, PDF OCR, and PDF section requests use small, bounded parallel batches to reduce serial waiting while limiting provider load. Hosted audio/video recordings are sent to Groq for transcription (up to 25 MB per upload). Review each provider's data-handling terms before uploading; avoid confidential material.
 
 ## Interface
 
@@ -109,8 +109,10 @@ For a local Ollama model, install Ollama, download the model you want to use, an
 
 ```powershell
 ollama pull gemma3:4b
+ollama pull qwen3-vl:4b-instruct
 $env:OLLAMA_HOST = "http://localhost:11434"
 $env:SLOTH_MODEL = "gemma3:4b"
+$env:SLOTH_VISION_MODEL = "qwen3-vl:4b-instruct"
 ```
 
 To use Ollama Cloud instead, set the cloud endpoint and API key in the current PowerShell session. Never commit the key or paste it into source files:
@@ -140,6 +142,7 @@ Study Sloth uses the Ollama chat API and lets you select the text and vision mod
 | `OLLAMA_API_KEY` | Empty | API key for a hosted Ollama provider |
 | `SLOTH_MODEL` | `gemma4:cloud` | Text-generation model |
 | `SLOTH_VISION_MODEL` | `qwen3-vl:4b-instruct` | Model used when an image is included |
+| `SLOTH_OCR_MAX_PAGES` | `30` | Maximum image-only PDF pages to process with OCR per document |
 | `SLOTH_WHISPER` | `small` | Local faster-whisper model size |
 | `GROQ_API_KEY` | Empty | Secret API key for hosted audio/video transcription |
 | `GROQ_TRANSCRIPTION_MODEL` | `whisper-large-v3-turbo` | Groq speech-to-text model |
@@ -151,7 +154,7 @@ ollama pull gemma3:4b
 $env:SLOTH_MODEL = "gemma3:4b"
 ```
 
-The vision model has its own setting, `SLOTH_VISION_MODEL`, and remains Qwen 3 VL by default. For Render, set `SLOTH_MODEL=gemma4:cloud` and confirm the model is available to your Ollama Cloud account. The cloud model identifier differs from the local Ollama model tag.
+The vision model has its own setting, `SLOTH_VISION_MODEL`, and remains Qwen 3 VL by default. Download it for local scanned-PDF OCR with `ollama pull qwen3-vl:4b-instruct`. For Render, set `SLOTH_MODEL=gemma4:cloud` and confirm the vision model is also available to your Ollama Cloud account. The cloud model identifier differs from the local Ollama model tag.
 
 GitHub Copilot was used as an AI development assistant during implementation. It is not required to run Study Sloth.
 

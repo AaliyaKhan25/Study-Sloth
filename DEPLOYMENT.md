@@ -38,7 +38,7 @@ Both services use Render's free web-service plan. The full app sends audio/video
 
 The `render.yaml` Blueprint is also configured for free services, but you can create the web service manually with the settings above instead.
 
-The hosted app includes browser-based audio/video transcription via Groq. Recordings are sent to Groq for processing; the direct upload limit is 25 MB. Review Groq's data-handling terms and current quota/pricing before uploading. Render's free filesystem is temporary, so the app's SQLite workspace data and uploads are not durable and can disappear during service restarts or redeploys. The app does not have account login; do not upload sensitive or confidential material.
+The hosted app includes browser-based audio/video transcription via Groq. Recordings are sent to Groq for processing; the direct upload limit is 25 MB. Scanned PDF pages are rasterized on the service and sent to the configured Ollama vision model for OCR. The default OCR limit is 30 scanned pages per PDF and can be changed with `SLOTH_OCR_MAX_PAGES`. Review provider data-handling terms and current quotas before uploading. Render's free filesystem is temporary, so the app's SQLite workspace data and uploads are not durable and can disappear during service restarts or redeploys. The app does not have account login; do not upload sensitive or confidential material.
 
 If you previously added `/var/data` environment paths while configuring a persistent disk, remove `SLOTH_DB`, `SLOTH_UPLOAD_DIR`, and `HF_HOME` from the free service. The app detects an unmounted `/var/data` path and falls back to temporary storage with a warning, but removing those variables keeps the setup clear.
 

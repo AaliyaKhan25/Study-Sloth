@@ -171,6 +171,23 @@ def test_pdf_upload_submits_notes_and_study_set_job(monkeypatch):
     assert submitted[0][0] == "pdf_notes"
     assert submitted[0][2] is pl.pdf_notes_job
 
+def test_scanned_syllabus_pdf_is_processed_as_a_background_job(monkeypatch):
+    from app import main
+
+    submitted = []
+    monkeypatch.setattr(main, "save", lambda file: "syllabus.pdf")
+    monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
+
+    with TestClient(main.app) as client:
+        sid = client.post("/api/subjects", data={"name": "History"}).json()["id"]
+        response = client.post(
+            f"/api/subjects/{sid}/syllabus",
+            files={"file": ("syllabus.pdf", b"%PDF-test", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    assert submitted[0][0:3] == ("syllabus", sid, pl.syllabus_pdf_job)
+
 def test_lecture_job_batches_notes_and_reports_completed_chunks():
     lines = [f"[00:00] {str(index).ljust(90, 'x')}" for index in range(200)]
     progress = []
@@ -194,16 +211,81 @@ def test_pdf_notes_job_generates_flashcards_for_the_subject():
     progress = []
     with mock.patch.object(pl.db, "q", return_value=[{"title": "Cell biology", "subject_id": 7}]), \
             mock.patch.object(pl.db, "x") as update_pdf, \
-            mock.patch.object(pl, "_pdf_chunks", return_value=["PDF source text"]), \
+            mock.patch.object(pl, "_pdf_chunks", return_value=["PDF source text"]) as read_pdf, \
             mock.patch.object(pl, "_pdf_notes_from_text", return_value="# Cell biology notes"), \
             mock.patch.object(pl, "cards_from", return_value=18) as generate_cards:
         pl.pdf_notes_job(12, "cells.pdf", lambda value, message="": progress.append((value, message)))
 
+    assert read_pdf.call_args.kwargs["limit"] == 16000
+    assert callable(read_pdf.call_args.kwargs["progress"])
     update_pdf.assert_called_once_with(
         "update pdf_notes set notes=? where id=?", ("# Cell biology notes", 12)
     )
     generate_cards.assert_called_once_with(7, None, "# Cell biology notes", pdf_note_id=12)
     assert progress[-1] == (0.96, "Making flashcards and questions from PDF notes")
+
+def test_scanned_pdf_pages_are_rendered_and_ocr_is_merged_in_page_order():
+    import fitz
+    from app import pdf_ocr
+
+    source = fitz.open()
+    text_page = source.new_page()
+    text_page.insert_text((72, 72), "Selectable page text")
+    scanned_page = source.new_page()
+    image = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 240, 120), False)
+    image.clear_with(255)
+    scanned_page.insert_image(scanned_page.rect, stream=image.tobytes("png"))
+    raw_pdf = source.tobytes()
+    source.close()
+    progress = []
+
+    with mock.patch.object(pdf_ocr, "chat", return_value="OCR page text") as ocr:
+        pages, total, used_ocr = pdf_ocr.extract_pdf_pages(
+            raw_pdf,
+            progress=lambda completed, count, page: progress.append((completed, count, page)),
+        )
+
+    assert pages == [(1, "Selectable page text"), (2, "OCR page text")]
+    assert total == 2
+    assert used_ocr is True
+    assert progress == [(1, 1, 2)]
+    assert ocr.call_args.kwargs["images"][0].startswith(b"\x89PNG\r\n\x1a\n")
+    assert ocr.call_args.kwargs["timeout"] == 180
+
+def test_scanned_pdf_ocr_page_limit_has_actionable_error(monkeypatch):
+    import fitz
+    from app import pdf_ocr
+
+    source = fitz.open()
+    source.new_page()
+    source.new_page()
+    raw_pdf = source.tobytes()
+    source.close()
+    monkeypatch.setattr(pdf_ocr, "MAX_OCR_PAGES", 1)
+
+    with pytest.raises(ValueError, match="2 pages that need OCR.*limit is 1"):
+        pdf_ocr.extract_pdf_pages(raw_pdf)
+
+def test_online_pdf_study_uses_ocr_extracted_page_text(monkeypatch):
+    import online
+
+    monkeypatch.setitem(
+        online.JOBS, "ocr-test",
+        {"status": "running", "progress": 0, "message": "", "result": None, "t": 0},
+    )
+    responses = [
+        {"points": [{"text": "Photosynthesis", "topic": "Biology", "heading": "Photosynthesis", "ref": "p.1"}]},
+        {"summary": ["Plants convert light into chemical energy."]},
+        {"flashcards": [{"q": "What is photosynthesis?", "a": "Conversion of light to chemical energy."}],
+         "quiz": [], "viva": []},
+    ]
+    with mock.patch.object(online, "extract_pdf_pages", return_value=([(1, "OCR extracted text")], 1, True)), \
+            mock.patch.object(online, "chat_json", side_effect=responses):
+        online.work("ocr-test", b"pdf-bytes", 1, "scan.pdf")
+
+    assert online.JOBS["ocr-test"]["status"] == "done"
+    assert online.JOBS["ocr-test"]["result"]["flashcards"][0]["q"] == "What is photosynthesis?"
+    assert online.JOBS["ocr-test"]["result"]["points"][0]["text"] == "Photosynthesis"
 
 def test_pdf_flashcards_are_stored_with_their_pdf_source():
     study_material = {

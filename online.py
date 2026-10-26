@@ -7,6 +7,7 @@ from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.llm import chat_json
+from app.pdf_ocr import extract_pdf_pages
 
 MAX_PAGES = int(os.environ.get("SLOTH_MAX_PAGES", 30))
 MAX_CHARS = 120_000
@@ -32,11 +33,11 @@ def allow(ip):
         return True
 
 def pieces_of(raw, name, text):
-    """-> (list of (label, text), pages_in_file)"""
+    """Return text chunks, or PDF bytes for OCR in the background worker."""
     if not text.strip() and name.lower().endswith(".pdf"):
         from pypdf import PdfReader
         rd = PdfReader(io.BytesIO(raw)); n = len(rd.pages)
-        return [(f"p.{i}", (pg.extract_text() or "").strip()) for i, pg in enumerate(rd.pages[:MAX_PAGES], 1)], n
+        return raw, n
     body = (text.strip() or raw.decode("utf-8", "ignore"))[:MAX_CHARS]
     return [(f"part {i + 1}", body[k:k + 3000]) for i, k in enumerate(range(0, len(body), 3000))], 0
 
@@ -54,11 +55,21 @@ def strs(xs, keys):
 def work(jid, pieces, pages, name):
     j = JOBS[jid]
     try:
+        if name.lower().endswith(".pdf"):
+            def report_ocr(completed, total, page):
+                j.update(
+                    progress=0.05 + 0.2 * completed / total,
+                    message=f"Reading scanned PDF page {page} with OCR",
+                )
+            pdf_pages, pages, _ = extract_pdf_pages(
+                pieces, max_pages=MAX_PAGES, progress=report_ocr
+            )
+            pieces = [(f"p.{number}", text) for number, text in pdf_pages]
         bl = list(blocks_of(pieces)); pts = []
         for i, b in enumerate(bl):
             j.update(progress=0.1 + 0.6 * i / max(len(bl), 1), message=f"Reading part {i + 1} of {len(bl)}")
             pts += strs(chat_json(POINTS + b, system=SYS).get("points", []), ["text", "topic", "heading", "ref"])
-        if not pts: raise RuntimeError("No readable text found. Scanned (image-only) PDFs are not supported online.")
+        if not pts: raise RuntimeError("No readable text was found in this file.")
         notes = "\n".join(f"{p['topic']}: {p['text']}" for p in pts)[:6000]
         j.update(progress=0.75, message="Writing the summary")
         s = chat_json('Summarise these notes as 5 to 7 short bullet strings. Return JSON: {"summary":["..."]}\n\n' + notes, system=SYS).get("summary", [])

@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from . import db
 from .llm import chat, chat_json
+from .pdf_ocr import extract_pdf_pages
 
 SYS = "You are a careful study assistant. Use ONLY the material given. If something is unclear, say so instead of guessing."
 MODEL_WORKERS = 2
@@ -16,6 +17,16 @@ def syllabus_job(sid, text, p):
     r = chat_json('Split this syllabus into units. Return JSON: {"units":[{"name":"Unit 1: Title","topics":["..."]}]}\n\n' + text[:8000], system=SYS)
     units = [u for u in r.get("units", []) if isinstance(u, dict) and u.get("name")] or [{"name": "General", "topics": []}]
     db.x("update subjects set syllabus=?, units=? where id=?", (text, json.dumps(units), sid))
+
+def syllabus_pdf_job(sid, path, p):
+    p(0.05, "Reading syllabus PDF and checking scanned pages")
+    pages, _, _ = extract_pdf_pages(
+        path,
+        progress=lambda completed, total, page: p(
+            0.05 + 0.1 * completed / total, f"Reading scanned PDF page {page} with OCR"
+        ),
+    )
+    syllabus_job(sid, "\n\n".join(f"[Page {number}]\n{text}" for number, text in pages), p)
 
 def _split_words(text, limit):
     parts, words, size = [], [], 0
@@ -31,14 +42,10 @@ def _split_words(text, limit):
     if words: parts.append(" ".join(words))
     return parts
 
-def _pdf_chunks(path, limit=12000):
-    from pypdf import PdfReader
-    reader = PdfReader(path)
-    chunks, current, current_size, text_pages = [], [], 0, 0
-    for page_number, page in enumerate(reader.pages, 1):
-        text = (page.extract_text() or "").strip()
-        if not text: continue
-        text_pages += 1
+def _pdf_chunks(path, limit=12000, progress=None):
+    pages, _, _ = extract_pdf_pages(path, progress=progress)
+    chunks, current, current_size = [], [], 0
+    for page_number, text in pages:
         marker = f"[Source page {page_number}]\n"
         for part in _split_words(text, limit - len(marker)):
             block = marker + part
@@ -46,8 +53,6 @@ def _pdf_chunks(path, limit=12000):
                 chunks.append("\n".join(current)); current, current_size = [], 0
             current.append(block); current_size += len(block) + 1
     if current: chunks.append("\n".join(current))
-    if not text_pages:
-        raise ValueError("No selectable text was found in this PDF. Scanned PDFs need OCR before note generation.")
     return chunks
 
 def _pdf_notes_from_text(text, title, final=False):
@@ -90,8 +95,14 @@ def _parallel_map(items, worker, p, start, span, label):
 def pdf_notes_job(doc_id, path, p):
     doc = db.q("select title,subject_id from pdf_notes where id=?", (doc_id,))[0]
     title = doc["title"]
-    p(0.02, "Extracting PDF text")
-    chunks = _pdf_chunks(path, limit=16000)
+    p(0.02, "Extracting PDF text and checking scanned pages")
+    chunks = _pdf_chunks(
+        path,
+        limit=16000,
+        progress=lambda completed, total, page: p(
+            0.02 + 0.04 * completed / total, f"Reading scanned PDF page {page} with OCR"
+        ),
+    )
     if len(chunks) == 1:
         p(0.08, "Summarizing PDF with local language model")
         summaries = [_pdf_notes_from_text(chunks[0], title, final=True)]
@@ -182,11 +193,16 @@ def lecture_job(lid, path, p):
     cards_from(lec["subject_id"], lid, "\n".join(f"{x.get('heading','')}: {x.get('text','')}" for x in pts)[:6000])
 
 def pdf_job(lid, path, p):
-    from pypdf import PdfReader
     lec = db.q("select * from lectures where id=?", (lid,))[0]
     names = [u["name"] for u in units_of(lec["subject_id"])] or ["General"]
-    p(0.1, "Reading PDF")
-    pages = [f"[p.{i}]\n{(pg.extract_text() or '').strip()}" for i, pg in enumerate(PdfReader(path).pages, 1)]
+    p(0.1, "Reading PDF and checking scanned pages")
+    page_text, _, _ = extract_pdf_pages(
+        path,
+        progress=lambda completed, total, page: p(
+            0.1 + 0.05 * completed / total, f"Reading scanned PDF page {page} with OCR"
+        ),
+    )
+    pages = [f"[p.{number}]\n{text}" for number, text in page_text]
     db.x("update lectures set transcript=? where id=?", ("\n\n".join(pages), lid))
     cs = list(chunks(pages, 14000))
     def extract_points(c):

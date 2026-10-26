@@ -1,4 +1,4 @@
-import os, json, uuid, html, shutil, io, re
+import os, json, uuid, html, shutil, re
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import FileResponse, HTMLResponse
@@ -52,11 +52,11 @@ def subject(sid: int):
 @app.post("/api/subjects/{sid}/syllabus")
 def syllabus(sid: int, text: str = Form(""), file: UploadFile = File(None)):
     if file and file.filename:
-        raw = file.file.read()
         if file.filename.lower().endswith(".pdf"):
-            from pypdf import PdfReader
-            text = "\n".join(pg.extract_text() or "" for pg in PdfReader(io.BytesIO(raw)).pages)
-        else: text = raw.decode("utf-8", "ignore")
+            submit("syllabus", sid, pl.syllabus_pdf_job, sid, save(file))
+            return {"ok": 1}
+        raw = file.file.read()
+        text = raw.decode("utf-8", "ignore")
     if not text.strip(): raise HTTPException(400, "Paste the syllabus or upload a .txt/.pdf")
     submit("syllabus", sid, pl.syllabus_job, sid, text); return {"ok": 1}
 

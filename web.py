@@ -76,6 +76,7 @@ LABELS = {   # the page says "local"; the hosted version is not, so say what rea
     "On-device processing": "Processed by an open model (Ollama Cloud)",
     "Audio stays on this computer": "Lecture audio is sent to Groq for transcription",
     "PDF stays on this computer": "PDF text is sent to Ollama Cloud",
+    "Scanned page images and PDF text are sent to the configured AI model": "PDF text and scanned page images are sent to Ollama Cloud",
     "Parsed and organized locally": "Processed by an open model (Ollama Cloud)",
     "Local model · your code is never generated": "Your code and output are never generated",
     "Powered locally on your computer": "Open-source models via Ollama Cloud",
