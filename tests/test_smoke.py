@@ -178,7 +178,7 @@ def test_local_lecture_upload_is_not_limited_to_hosted_groq_size(monkeypatch):
     from app import main
 
     submitted = []
-    monkeypatch.setattr(main.app.state, "hosted", False)
+    monkeypatch.setattr(main.app.state, "hosted", False, raising=False)
     monkeypatch.setattr(main, "save", lambda file: "lecture.mp4")
     monkeypatch.setattr(main, "submit", lambda *args: submitted.append(args))
 
